@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:www.familywall.com)",
+      "Bash(npm install)",
+      "Bash(npx vite build)",
+      "Bash(npx tsc --noEmit)",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(cygpath -w /c/nvm4w/nodejs/npm.cmd)",
+      "Bash(node -e \"console.log\\(require.resolve\\(''vite/bin/vite.js'', {paths: [''C:/Users/Emmanuel Gomis/Desktop/familyapp'']}\\)\\)\")",
+      "Bash(npx tsc:*)",
+      "Bash(node -e \"const p = require\\(''tailwindcss/package.json''\\); console.log\\(''tailwindcss'', p.version\\)\")",
+      "Bash(npx tsx:*)",
+      "Bash(psql --version)",
+      "Bash(node -e \"console.log\\(require\\('@prisma/client/package.json'\\).version\\)\")",
+      "Bash(PGPASSWORD=postgres psql -h localhost -U postgres -c \"SELECT 1\")",
+      "Read(//c/Program Files/PostgreSQL/**)",
+      "Bash(PGPASSWORD=postgres \"/c/Program Files/PostgreSQL/18/bin/psql.exe\" -h localhost -U postgres -c \"SELECT version\\(\\)\")",
+      "Bash(npx prisma:*)"
+    ]
+  }
+}

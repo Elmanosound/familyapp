@@ -1,0 +1,494 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─── USER ──────────────────────────────────────────────────
+
+model User {
+  id                   String   @id @default(uuid())
+  email                String   @unique
+  password             String
+  firstName            String
+  lastName             String
+  avatarUrl            String?
+  phone                String?
+  activeFamilyId       String?
+  refreshToken         String?
+  resetPasswordToken   String?
+  resetPasswordExpires DateTime?
+  notificationPrefs    String   @default("{\"push\": true, \"email\": true, \"locationSharing\": false}")
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  // Relations
+  familyMembers       FamilyMember[]
+  calendarEvents      CalendarEvent[]       @relation("EventCreator")
+  eventAssignments    EventAssignment[]
+  listsCreated        List[]
+  listItemsAdded      ListItem[]            @relation("ItemAdder")
+  listItemsAssigned   ListItem[]            @relation("ItemAssignee")
+  listItemsCompleted  ListItem[]            @relation("ItemCompleter")
+  messagesSent        Message[]
+  messageReadReceipts MessageReadReceipt[]
+  locations           Location[]
+  geofencesCreated    Geofence[]
+  geofenceWatchers    GeofenceWatcher[]
+  mediaUploaded       Media[]
+  mediaLikes          MediaLike[]
+  mediaComments       MediaComment[]
+  albumsCreated       Album[]
+  expensesPaid        Expense[]
+  expenseSplits       ExpenseSplit[]
+  goalsCreated        BudgetGoal[]
+  goalContributions   GoalContribution[]
+  recipesCreated      Recipe[]
+  mealPlansCreated    MealPlan[]
+  invitationsSent     Invitation[]
+  familiesCreated     Family[]
+
+  @@map("users")
+}
+
+// ─── FAMILY ────────────────────────────────────────────────
+
+model Family {
+  id        String   @id @default(uuid())
+  name      String
+  type      String   @default("family") // family, friends, neighbors, custom
+  avatarUrl String?
+  createdById String
+  settings  String   @default("{\"locationSharingEnabled\": false, \"defaultCurrency\": \"EUR\"}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  createdBy      User             @relation(fields: [createdById], references: [id])
+  members        FamilyMember[]
+  invitations    Invitation[]
+  calendarEvents CalendarEvent[]
+  lists          List[]
+  messages       Message[]
+  media          Media[]
+  albums         Album[]
+  locations      Location[]
+  geofences      Geofence[]
+  expenses       Expense[]
+  budgetGoals    BudgetGoal[]
+  recipes        Recipe[]
+  mealPlans      MealPlan[]
+
+  @@map("families")
+}
+
+model FamilyMember {
+  id       String   @id @default(uuid())
+  familyId String
+  userId   String
+  role     String   @default("member") // admin, member, child
+  color    String   @default("#3b82f6")
+  joinedAt DateTime @default(now())
+
+  family Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([familyId, userId])
+  @@map("family_members")
+}
+
+// ─── INVITATION ────────────────────────────────────────────
+
+model Invitation {
+  id        String   @id @default(uuid())
+  familyId  String
+  invitedById String
+  email     String
+  role      String   @default("member")
+  token     String   @unique
+  status    String   @default("pending") // pending, accepted, expired
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  family    Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  invitedBy User   @relation(fields: [invitedById], references: [id])
+
+  @@map("invitations")
+}
+
+// ─── CALENDAR ──────────────────────────────────────────────
+
+model CalendarEvent {
+  id          String    @id @default(uuid())
+  familyId    String
+  title       String
+  description String?
+  startDate   DateTime
+  endDate     DateTime
+  allDay      Boolean   @default(false)
+  recurrence  String?   // JSON: {frequency, interval, endDate, daysOfWeek}
+  location    String?
+  color       String?
+  reminders   String?   // JSON: [{type, minutesBefore}]
+  createdById String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  family      Family            @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  createdBy   User              @relation("EventCreator", fields: [createdById], references: [id])
+  assignments EventAssignment[]
+
+  @@index([familyId, startDate])
+  @@map("calendar_events")
+}
+
+model EventAssignment {
+  id      String @id @default(uuid())
+  eventId String
+  userId  String
+
+  event CalendarEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user  User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, userId])
+  @@map("event_assignments")
+}
+
+// ─── LISTS ─────────────────────────────────────────────────
+
+model List {
+  id         String   @id @default(uuid())
+  familyId   String
+  name       String
+  type       String   @default("shopping") // shopping, todo, custom
+  icon       String?
+  color      String?
+  createdById String
+  isArchived Boolean  @default(false)
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  family    Family     @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  createdBy User       @relation(fields: [createdById], references: [id])
+  items     ListItem[]
+
+  @@index([familyId, isArchived])
+  @@map("lists")
+}
+
+model ListItem {
+  id           String    @id @default(uuid())
+  listId       String
+  familyId     String
+  text         String
+  isCompleted  Boolean   @default(false)
+  completedById String?
+  completedAt  DateTime?
+  category     String?
+  quantity     Float?
+  unit         String?
+  assignedToId String?
+  sortOrder    Int       @default(0)
+  addedById    String
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  list        List  @relation(fields: [listId], references: [id], onDelete: Cascade)
+  addedBy     User  @relation("ItemAdder", fields: [addedById], references: [id])
+  assignedTo  User? @relation("ItemAssignee", fields: [assignedToId], references: [id])
+  completedBy User? @relation("ItemCompleter", fields: [completedById], references: [id])
+
+  @@index([listId, isCompleted])
+  @@map("list_items")
+}
+
+// ─── MESSAGES ──────────────────────────────────────────────
+
+model Message {
+  id                String   @id @default(uuid())
+  familyId          String
+  senderId          String
+  type              String   @default("text") // text, image, video, system
+  content           String?
+  mediaUrl          String?
+  mediaThumbnailUrl String?
+  replyToId         String?
+  isDeleted         Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  family   Family               @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  sender   User                 @relation(fields: [senderId], references: [id])
+  replyTo  Message?             @relation("MessageReplies", fields: [replyToId], references: [id])
+  replies  Message[]            @relation("MessageReplies")
+  readBy   MessageReadReceipt[]
+
+  @@index([familyId, createdAt(sort: Desc)])
+  @@map("messages")
+}
+
+model MessageReadReceipt {
+  id        String   @id @default(uuid())
+  messageId String
+  userId    String
+  readAt    DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+  @@map("message_read_receipts")
+}
+
+// ─── LOCATION ──────────────────────────────────────────────
+
+model Location {
+  id        String   @id @default(uuid())
+  userId    String
+  familyId  String
+  latitude  Float
+  longitude Float
+  accuracy  Float?
+  battery   Float?
+  timestamp DateTime @default(now())
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  family Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  @@index([userId, familyId, timestamp(sort: Desc)])
+  @@map("locations")
+}
+
+model Geofence {
+  id             String  @id @default(uuid())
+  familyId       String
+  name           String
+  centerLat      Float
+  centerLng      Float
+  radius         Float
+  notifyOnEntry  Boolean @default(true)
+  notifyOnExit   Boolean @default(true)
+  isActive       Boolean @default(true)
+  createdById    String
+  createdAt      DateTime @default(now())
+
+  family         Family            @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  createdBy      User              @relation(fields: [createdById], references: [id])
+  watchedMembers GeofenceWatcher[]
+
+  @@map("geofences")
+}
+
+model GeofenceWatcher {
+  id         String @id @default(uuid())
+  geofenceId String
+  userId     String
+
+  geofence Geofence @relation(fields: [geofenceId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([geofenceId, userId])
+  @@map("geofence_watchers")
+}
+
+// ─── MEDIA ─────────────────────────────────────────────────
+
+model Media {
+  id               String    @id @default(uuid())
+  familyId         String
+  albumId          String?
+  uploadedById     String
+  type             String    @default("image") // image, video
+  url              String
+  thumbnailUrl     String?
+  originalFilename String?
+  fileSize         Int?
+  width            Int?
+  height           Int?
+  duration         Float?
+  caption          String?
+  takenAt          DateTime?
+  createdAt        DateTime  @default(now())
+
+  family     Family         @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  album      Album?         @relation(fields: [albumId], references: [id], onDelete: SetNull)
+  uploadedBy User           @relation(fields: [uploadedById], references: [id])
+  likes      MediaLike[]
+  comments   MediaComment[]
+
+  @@index([familyId, createdAt(sort: Desc)])
+  @@map("media")
+}
+
+model MediaLike {
+  id      String   @id @default(uuid())
+  mediaId String
+  userId  String
+  createdAt DateTime @default(now())
+
+  media Media @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([mediaId, userId])
+  @@map("media_likes")
+}
+
+model MediaComment {
+  id        String   @id @default(uuid())
+  mediaId   String
+  userId    String
+  text      String
+  createdAt DateTime @default(now())
+
+  media Media @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("media_comments")
+}
+
+model Album {
+  id            String   @id @default(uuid())
+  familyId      String
+  name          String
+  coverImageUrl String?
+  createdById   String
+  createdAt     DateTime @default(now())
+
+  family    Family  @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  createdBy User    @relation(fields: [createdById], references: [id])
+  media     Media[]
+
+  @@index([familyId])
+  @@map("albums")
+}
+
+// ─── BUDGET ────────────────────────────────────────────────
+
+model Expense {
+  id          String   @id @default(uuid())
+  familyId    String
+  amount      Float
+  currency    String   @default("EUR")
+  category    String
+  description String?
+  date        DateTime
+  paidById    String
+  receiptUrl  String?
+  isRecurring Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  family  Family         @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  paidBy  User           @relation(fields: [paidById], references: [id])
+  splits  ExpenseSplit[]
+
+  @@index([familyId, date(sort: Desc)])
+  @@index([familyId, category])
+  @@map("expenses")
+}
+
+model ExpenseSplit {
+  id        String @id @default(uuid())
+  expenseId String
+  userId    String
+
+  expense Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([expenseId, userId])
+  @@map("expense_splits")
+}
+
+model BudgetGoal {
+  id            String    @id @default(uuid())
+  familyId      String
+  name          String
+  targetAmount  Float
+  currentAmount Float     @default(0)
+  currency      String    @default("EUR")
+  deadline      DateTime?
+  icon          String?
+  createdById   String
+  isCompleted   Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+
+  family        Family             @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  createdBy     User               @relation(fields: [createdById], references: [id])
+  contributions GoalContribution[]
+
+  @@map("budget_goals")
+}
+
+model GoalContribution {
+  id     String   @id @default(uuid())
+  goalId String
+  userId String
+  amount Float
+  date   DateTime @default(now())
+  note   String?
+
+  goal BudgetGoal @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  user User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("goal_contributions")
+}
+
+// ─── MEALS ─────────────────────────────────────────────────
+
+model Recipe {
+  id           String   @id @default(uuid())
+  familyId     String
+  name         String
+  description  String?
+  imageUrl     String?
+  servings     Int?
+  prepTime     Int?     // minutes
+  cookTime     Int?     // minutes
+  ingredients  String   @default("[]") // JSON: [{name, quantity, unit}]
+  instructions String   @default("[]") // JSON: [string]
+  tags         String   @default("[]") // JSON: string[]
+  sourceUrl    String?
+  createdById  String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  family    Family     @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  createdBy User       @relation(fields: [createdById], references: [id])
+  mealSlots MealSlot[]
+
+  @@index([familyId])
+  @@map("recipes")
+}
+
+model MealPlan {
+  id            String   @id @default(uuid())
+  familyId      String
+  weekStartDate DateTime
+  createdById   String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  family    Family     @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  createdBy User       @relation(fields: [createdById], references: [id])
+  meals     MealSlot[]
+
+  @@unique([familyId, weekStartDate])
+  @@map("meal_plans")
+}
+
+model MealSlot {
+  id             String  @id @default(uuid())
+  mealPlanId     String
+  dayOfWeek      Int     // 0-6
+  mealType       String  // breakfast, lunch, dinner, snack
+  recipeId       String?
+  customMealName String?
+  notes          String?
+
+  mealPlan MealPlan @relation(fields: [mealPlanId], references: [id], onDelete: Cascade)
+  recipe   Recipe?  @relation(fields: [recipeId], references: [id], onDelete: SetNull)
+
+  @@map("meal_slots")
+}
