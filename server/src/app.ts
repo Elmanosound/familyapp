@@ -4,9 +4,14 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import path from 'path';
 import fs from 'fs';
+import { fileURLToPath } from 'url';
 import routes from './routes/index.js';
 import { errorHandler } from './middleware/error.middleware.js';
 import { env } from './config/env.js';
+
+// ESM-safe __dirname replacement
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 
@@ -23,8 +28,10 @@ app.use(morgan(env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Serve uploaded files statically
-const uploadsDir = path.resolve(process.cwd(), 'uploads');
+// Serve uploaded files statically.
+// In production the compiled file is at /app/server/dist/app.js, so uploads
+// sit at /app/server/uploads (next to the compiled tree).
+const uploadsDir = path.resolve(__dirname, '..', 'uploads');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 app.use('/uploads', express.static(uploadsDir));
 
@@ -37,19 +44,28 @@ app.get('/health', (_req, res) => {
 });
 
 // ─── Production: serve the built React client ─────────────────────
-// In production, the client static files are bundled inside the same image
-// at /app/client (built by the multi-stage Dockerfile). In development,
-// the Vite dev server handles the client on port 5173.
+// In production, the compiled app file lives at /app/server/dist/app.js
+// and the client static files are copied to /app/client by the Dockerfile.
+// In development, the Vite dev server handles the client on port 5173,
+// so this block is skipped.
 if (env.NODE_ENV === 'production') {
-  const clientDist = path.resolve(process.cwd(), 'client');
-  if (fs.existsSync(clientDist)) {
+  // Allow explicit override, otherwise derive from __dirname so we work
+  // regardless of cwd: /app/server/dist/app.js → /app/client
+  const clientDist =
+    env.CLIENT_DIST_PATH ?? path.resolve(__dirname, '..', '..', 'client');
+
+  if (fs.existsSync(path.join(clientDist, 'index.html'))) {
+    console.log(`[app] Serving static client from ${clientDist}`);
     app.use(express.static(clientDist));
     // SPA fallback: serve index.html for any non-API route so React Router works.
     app.get(/^(?!\/(api|uploads|health)).*/, (_req, res) => {
       res.sendFile(path.join(clientDist, 'index.html'));
     });
   } else {
-    console.warn(`[app] Client dist not found at ${clientDist}; serving API only.`);
+    console.warn(
+      `[app] Client index.html not found at ${clientDist}; serving API only. ` +
+        `Set CLIENT_DIST_PATH to override.`,
+    );
   }
 }
 

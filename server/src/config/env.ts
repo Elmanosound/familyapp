@@ -17,4 +17,7 @@ export const env = {
   SMTP_USER: process.env.SMTP_USER || '',
   SMTP_PASS: process.env.SMTP_PASS || '',
   CLIENT_URL: process.env.CLIENT_URL || 'http://localhost:5173',
+  // Optional override for the built React client directory.
+  // If unset, app.ts derives it from the compiled file location.
+  CLIENT_DIST_PATH: process.env.CLIENT_DIST_PATH || undefined,
 };
