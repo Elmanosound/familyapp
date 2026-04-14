@@ -2,84 +2,79 @@
 
 # ============================================================
 #  FamilyApp — Multi-stage Dockerfile
-#  Builds shared types, server (Express), and client (Vite)
-#  Runtime: a single Node.js process serving the API + the
-#  static React client + uploaded files.
+#
+#  Builds the shared types, the Express server, and the React
+#  client into a single Node.js runtime image that also serves
+#  the static SPA from /app/client.
 #
 #  Build:    docker build -t familyapp .
-#  Run:      docker run -p 8080:8080 \
-#              -e DATABASE_URL=postgresql://... \
-#              -e JWT_SECRET=... \
-#              familyapp
+#  Compose:  docker compose up -d --build
 # ============================================================
 
-# ─── Stage 1: dependencies ──────────────────────────────────
-FROM node:20-alpine AS deps
+# ─── Stage 1: base image shared by every stage ──────────────
+FROM node:20-alpine AS base
 WORKDIR /app
+# OpenSSL for Prisma engine, tini for proper PID 1 signal handling,
+# wget for the container healthcheck.
+RUN apk add --no-cache openssl tini wget
 
-# Copy manifests for monorepo workspaces
+
+# ─── Stage 2: install all workspace dependencies ────────────
+FROM base AS deps
 COPY package.json package-lock.json ./
 COPY shared/package.json ./shared/
 COPY server/package.json ./server/
 COPY client/package.json ./client/
-
-# Install all workspaces deps (including devDependencies — needed for build)
+# npm workspaces hoist most deps to /app/node_modules — we only need
+# that single directory to reach every package. Including dev deps
+# because the build stage compiles TypeScript and runs Vite.
 RUN npm ci --workspaces --include-workspace-root
 
 
-# ─── Stage 2: build ────────────────────────────────────────
-FROM node:20-alpine AS build
-WORKDIR /app
-
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/shared/node_modules ./shared/node_modules
-COPY --from=deps /app/server/node_modules ./server/node_modules
-COPY --from=deps /app/client/node_modules ./client/node_modules
+# ─── Stage 3: build shared → server → client ────────────────
+FROM deps AS build
 COPY . .
+# Build in dependency order. `npm run build -w server` runs
+# `prisma generate` first, which writes /app/node_modules/.prisma
+RUN npm run build -w shared \
+ && npm run build -w server \
+ && npm run build -w client
 
-# Build order: shared → server (with prisma generate) → client
-RUN npm run build -w shared
-RUN npm run build -w server
-RUN npm run build -w client
 
-
-# ─── Stage 3: production runtime ────────────────────────────
-FROM node:20-alpine AS runtime
-WORKDIR /app
+# ─── Stage 4: production runtime ────────────────────────────
+FROM base AS runtime
 ENV NODE_ENV=production
 ENV PORT=8080
 
-# OpenSSL is needed by Prisma on Alpine
-RUN apk add --no-cache openssl tini
+# We copy the full (hoisted) node_modules from the build stage.
+# This includes the generated Prisma client (/app/node_modules/.prisma)
+# and the prisma CLI used at startup for `prisma db push`.
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/package.json ./package.json
+COPY --from=build /app/package-lock.json ./package-lock.json
 
-# Copy only the production bits we need
-COPY package.json package-lock.json ./
-COPY shared/package.json ./shared/
-COPY server/package.json ./server/
-
-# Install production dependencies only
-RUN npm ci --workspaces --include-workspace-root --omit=dev \
- && npm cache clean --force
-
-# Copy compiled artifacts from the build stage
+# Shared workspace (source re-exported as package main)
+COPY --from=build /app/shared/package.json ./shared/package.json
 COPY --from=build /app/shared/src ./shared/src
+
+# Compiled server + Prisma schema
+COPY --from=build /app/server/package.json ./server/package.json
 COPY --from=build /app/server/dist ./server/dist
 COPY --from=build /app/server/prisma ./server/prisma
-COPY --from=build /app/server/node_modules/.prisma ./server/node_modules/.prisma
-COPY --from=build /app/server/node_modules/@prisma ./server/node_modules/@prisma
+
+# Built static client — Express serves this in production
 COPY --from=build /app/client/dist ./client
 
-# Persistent uploads directory
+# Uploads survive container restarts via a docker volume
 RUN mkdir -p /app/server/uploads
 VOLUME ["/app/server/uploads"]
 
 WORKDIR /app/server
 EXPOSE 8080
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
   CMD wget -qO- http://localhost:8080/health || exit 1
 
-# tini gives us proper signal handling (PID 1)
 ENTRYPOINT ["/sbin/tini", "--"]
-# Apply pending Prisma migrations (or create the schema on first boot) then start
-CMD ["sh", "-c", "npx prisma db push --skip-generate && node dist/index.js"]
+# Push the Prisma schema to the database on first boot, then start
+CMD ["sh", "-c", "npx prisma db push --skip-generate --accept-data-loss && node dist/index.js"]
