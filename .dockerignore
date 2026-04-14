@@ -1,0 +1,40 @@
+# Build output (rebuilt inside the image)
+**/dist
+**/build
+**/.next
+**/.vite
+**/.turbo
+
+# Dependencies (installed inside the image)
+**/node_modules
+
+# Local databases
+**/*.db
+**/*.db-journal
+server/prisma/migrations/**/migration_lock.toml
+
+# Environment files (use real env vars in production)
+.env
+.env.local
+.env.*.local
+**/.env
+**/.env.local
+
+# Local uploads (use a docker volume / GCS in prod)
+server/uploads/*
+!server/uploads/.gitkeep
+
+# Editor / OS / VCS
+.git
+.gitignore
+.dockerignore
+.idea
+.vscode
+.claude
+.DS_Store
+*.log
+npm-debug.log*
+
+# Documentation that doesn't need to ship in the image
+README.md
+docs/

@@ -16,7 +16,9 @@
       "Bash(PGPASSWORD=postgres psql -h localhost -U postgres -c \"SELECT 1\")",
       "Read(//c/Program Files/PostgreSQL/**)",
       "Bash(PGPASSWORD=postgres \"/c/Program Files/PostgreSQL/18/bin/psql.exe\" -h localhost -U postgres -c \"SELECT version\\(\\)\")",
-      "Bash(npx prisma:*)"
+      "Bash(npx prisma:*)",
+      "Bash(docker --version)",
+      "Bash(npm run:*)"
     ]
   }
 }

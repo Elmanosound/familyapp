@@ -1,0 +1,92 @@
+# ============================================================
+#  FamilyApp — Docker Compose stack
+#
+#  Usage:
+#    cp .env.docker.example .env
+#    # Edit .env (set POSTGRES_PASSWORD, JWT_SECRET, JWT_REFRESH_SECRET)
+#    docker compose up -d
+#
+#  Then open http://localhost:8080
+#
+#  Works identically on:
+#    - your local machine (dev preview of prod build)
+#    - a Compute Engine e2-micro VM (GCP free tier)
+#    - your home NAS (Ubuntu)
+# ============================================================
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: familyapp-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-familyapp}
+      POSTGRES_USER: ${POSTGRES_USER:-familyapp}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-familyapp} -d ${POSTGRES_DB:-familyapp}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # Postgres is NOT exposed to the host by default — only reachable from
+    # the `app` service via the internal network. Uncomment to expose:
+    # ports:
+    #   - "5432:5432"
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: familyapp:latest
+    container_name: familyapp-app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 8080
+      DATABASE_URL: postgresql://${POSTGRES_USER:-familyapp}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-familyapp}?schema=public
+      CLIENT_URL: ${CLIENT_URL:-http://localhost:8080}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET is required}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
+      JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-7d}
+      # Optional integrations — leave empty to disable
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY:-}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+    volumes:
+      - uploads_data:/app/server/uploads
+    ports:
+      - "${APP_PORT:-8080}:8080"
+
+  # Optional: Caddy reverse proxy with automatic HTTPS via Let's Encrypt.
+  # Enable by uncommenting and setting DOMAIN in .env.
+  # caddy:
+  #   image: caddy:2-alpine
+  #   container_name: familyapp-caddy
+  #   restart: unless-stopped
+  #   depends_on:
+  #     - app
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   volumes:
+  #     - ./Caddyfile:/etc/caddy/Caddyfile:ro
+  #     - caddy_data:/data
+  #     - caddy_config:/config
+  #   environment:
+  #     DOMAIN: ${DOMAIN:?set DOMAIN to your fqdn}
+
+volumes:
+  postgres_data:
+  uploads_data:
+  # caddy_data:
+  # caddy_config:

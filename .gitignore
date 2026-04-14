@@ -3,10 +3,19 @@ dist/
 build/
 .env
 .env.local
+.env.*.local
 *.log
 .DS_Store
 uploads/
 *.db
 *.db-journal
+*.tsbuildinfo
 coverage/
+
+# Docker overrides
+docker-compose.override.yml
+
+# Caddy data
+caddy_data/
+caddy_config/
 .vscode/

@@ -175,7 +175,8 @@ PORT=5000
 NODE_ENV=development
 CLIENT_URL=http://localhost:5173
 
-DATABASE_URL=file:./dev.db
+# Pour PostgreSQL (defaut du schema actuel)
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/familyapp
 
 JWT_SECRET=change-this-to-a-long-random-string
 JWT_REFRESH_SECRET=change-this-to-another-long-random-string
@@ -183,9 +184,41 @@ JWT_EXPIRES_IN=15m
 JWT_REFRESH_EXPIRES_IN=7d
 ```
 
+> **Mode SQLite (sans installation Postgres)** : changez le `provider` dans
+> `server/prisma/schema.prisma` en `"sqlite"` puis utilisez
+> `DATABASE_URL=file:./dev.db`. Pratique pour un demarrage instantane.
+
 Cette configuration minimale suffit pour lancer **auth, familles, calendrier,
 listes, messagerie, localisation, budget et repas**. Ajoutez Cloudinary et
 SMTP uniquement si vous utilisez les modules concernes.
+
+## Deploiement
+
+### Avec Docker Compose (recommande pour prod / NAS / VM)
+
+La stack inclut un `Dockerfile` multi-stage et un `docker-compose.yml` qui
+demarre **Postgres + l'app** en une commande. Identique en local, sur ton NAS,
+ou sur une VM Cloud.
+
+```bash
+cp .env.docker.example .env
+# Editer .env (POSTGRES_PASSWORD, JWT_SECRET, JWT_REFRESH_SECRET)
+docker compose up -d --build
+```
+
+L'app est ensuite accessible sur http://localhost:8080.
+
+### Sur Google Cloud
+
+Voir le guide complet : [`docs/deploy-gcp.md`](docs/deploy-gcp.md).
+
+Deux strategies sont documentees :
+
+- **Compute Engine `e2-micro`** (recommande) — VM dans le **free tier perpetuel**
+  GCP, deploie via `docker compose up`. Cout : **0 €** apres les 90 jours.
+  Identique a un futur deploiement NAS.
+- **Cloud Run + Cloud SQL** — serverless, scale a zero, HTTPS auto. Necessite
+  une migration des uploads vers Cloud Storage.
 
 ## Basculer vers PostgreSQL
 

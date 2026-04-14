@@ -3,7 +3,9 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  // Switch to "sqlite" for zero-dependency local dev (use file:./dev.db).
+  // Default is PostgreSQL — required for production / Docker Compose / Cloud SQL.
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
