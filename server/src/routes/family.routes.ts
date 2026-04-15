@@ -1,12 +1,17 @@
 import { Router } from 'express';
 import {
   createFamily, getFamilies, getFamily, updateFamily, deleteFamily,
-  inviteMember, acceptInvitation, removeMember, switchFamily,
+  inviteMember, acceptInvitation, getInvitationPreview, removeMember, switchFamily,
 } from '../controllers/family.controller.js';
 import { protect } from '../middleware/auth.middleware.js';
 import { requireFamilyMember, requireFamilyAdmin } from '../middleware/family.middleware.js';
 
 const router = Router();
+
+// ─── Public routes (must be declared before `router.use(protect)`) ─────
+// Preview an invitation by token so the accept-invite page can render the
+// target group's name even when the user is not yet logged in.
+router.get('/invitations/:token', getInvitationPreview);
 
 router.use(protect);
 

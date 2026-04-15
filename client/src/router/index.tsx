@@ -13,6 +13,7 @@ import { BudgetPage } from '../pages/BudgetPage';
 import { MealPlanPage } from '../pages/MealPlanPage';
 import { FamilySettingsPage } from '../pages/FamilySettingsPage';
 import { ProfilePage } from '../pages/ProfilePage';
+import { AcceptInvitePage } from '../pages/AcceptInvitePage';
 
 export function AppRouter() {
   return (
@@ -21,6 +22,9 @@ export function AppRouter() {
         {/* Public routes */}
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
+        {/* Public on purpose — the page handles both signed-in and
+            anonymous states and redirects through login/register as needed. */}
+        <Route path="/invite/:token" element={<AcceptInvitePage />} />
 
         {/* Protected routes */}
         <Route

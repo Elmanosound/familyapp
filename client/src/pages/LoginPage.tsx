@@ -1,5 +1,5 @@
 import { useState, FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Users } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
@@ -7,7 +7,14 @@ import { useAuthStore } from '../stores/authStore';
 import toast from 'react-hot-toast';
 
 export function LoginPage() {
-  const [email, setEmail] = useState('');
+  // `next` and `email` may be set when this page is opened from the
+  // invitation flow (/invite/:token). The email is a convenience prefill;
+  // the next path is where we send the user after a successful login.
+  const [searchParams] = useSearchParams();
+  const nextPath = searchParams.get('next');
+  const prefillEmail = searchParams.get('email') ?? '';
+
+  const [email, setEmail] = useState(prefillEmail);
   const [password, setPassword] = useState('');
   const { login, isLoading } = useAuthStore();
   const navigate = useNavigate();
@@ -16,11 +23,20 @@ export function LoginPage() {
     e.preventDefault();
     try {
       await login(email, password);
-      navigate('/dashboard');
+      // Only honour `next` when it looks like an internal path — blocks an
+      // open redirect like ?next=https://evil.com.
+      const safeNext = nextPath && nextPath.startsWith('/') ? nextPath : '/dashboard';
+      navigate(safeNext);
     } catch {
       toast.error('Email ou mot de passe incorrect');
     }
   };
+
+  // Preserve query params when switching to the register link so the
+  // invitation flow isn't lost.
+  const registerHref = nextPath || prefillEmail
+    ? `/register?${searchParams.toString()}`
+    : '/register';
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary-50 to-blue-100 dark:from-gray-900 dark:to-gray-800 p-4">
@@ -59,7 +75,7 @@ export function LoginPage() {
           </form>
           <p className="text-center text-sm text-gray-600 dark:text-gray-400 mt-4">
             Pas encore de compte ?{' '}
-            <Link to="/register" className="text-primary-600 hover:underline font-medium">
+            <Link to={registerHref} className="text-primary-600 hover:underline font-medium">
               S'inscrire
             </Link>
           </p>

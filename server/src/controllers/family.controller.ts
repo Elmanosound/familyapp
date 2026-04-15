@@ -139,6 +139,36 @@ export async function inviteMember(req: Request, res: Response, next: NextFuncti
   }
 }
 
+/**
+ * Public — no auth required. Returns the bare minimum about an invitation so
+ * the frontend can render "You've been invited to join [name]" before the
+ * user has logged in or created an account. Does NOT consume the token.
+ */
+export async function getInvitationPreview(req: Request, res: Response, next: NextFunction) {
+  try {
+    const invitation = await prisma.invitation.findUnique({
+      where: { token: req.params.token as string },
+      include: {
+        family: { select: { id: true, name: true, type: true } },
+      },
+    });
+    if (!invitation) throw new NotFoundError('Invitation');
+
+    const isExpired = invitation.expiresAt < new Date();
+    res.json({
+      invitation: {
+        email: invitation.email,
+        role: invitation.role,
+        status: isExpired ? 'expired' : invitation.status,
+        expiresAt: invitation.expiresAt,
+        family: invitation.family,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function acceptInvitation(req: Request, res: Response, next: NextFunction) {
   try {
     const invitation = await prisma.invitation.findUnique({
