@@ -7,6 +7,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import routes from './routes/index.js';
 import { errorHandler } from './middleware/error.middleware.js';
+import { idAliasMiddleware } from './middleware/id-alias.middleware.js';
 import { env } from './config/env.js';
 
 // ESM-safe __dirname replacement
@@ -27,6 +28,10 @@ app.use(cors({ origin: env.CLIENT_URL, credentials: true }));
 app.use(morgan(env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Alias Prisma's `id` → `_id` on every JSON response so the shared client
+// types (which historically use `_id`) keep working. Must come before routes.
+app.use(idAliasMiddleware);
 
 // Serve uploaded files statically.
 // In production the compiled file is at /app/server/dist/app.js, so uploads
