@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   UtensilsCrossed, Plus, Clock, Users, ChevronLeft, ChevronRight,
-  ShoppingCart, Trash2, X, Loader2,
+  ShoppingCart, Trash2, X, Loader2, Link as LinkIcon,
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
@@ -72,6 +72,8 @@ interface RecipeFormState {
   tags: string;
   ingredients: { name: string; quantity: string; unit: string }[];
   instructions: string[];
+  imageUrl?: string;
+  sourceUrl?: string;
 }
 
 const emptyRecipeForm: RecipeFormState = {
@@ -83,7 +85,23 @@ const emptyRecipeForm: RecipeFormState = {
   tags: '',
   ingredients: [{ name: '', quantity: '', unit: '' }],
   instructions: [''],
+  imageUrl: undefined,
+  sourceUrl: undefined,
 };
+
+/** Shape returned by POST /meals/recipes/import. All fields optional. */
+interface ImportedRecipe {
+  name?: string;
+  description?: string;
+  imageUrl?: string;
+  servings?: number;
+  prepTime?: number;
+  cookTime?: number;
+  ingredients?: { name: string; quantity: number; unit: string }[];
+  instructions?: string[];
+  tags?: string[];
+  sourceUrl?: string;
+}
 
 // ── Component ────────────────────────────────────────────────────────────────
 
@@ -113,6 +131,14 @@ export function MealPlanPage() {
   const [showRecipeForm, setShowRecipeForm] = useState(false);
   const [recipeForm, setRecipeForm] = useState<RecipeFormState>({ ...emptyRecipeForm });
   const [creatingRecipe, setCreatingRecipe] = useState(false);
+
+  // URL import modal — a small dialog that asks for a URL, calls the backend
+  // importer, then pre-fills the main "new recipe" form so the user can review
+  // before saving. Keeping this as a separate modal (rather than a field inside
+  // the main form) keeps the happy path clean.
+  const [showUrlImport, setShowUrlImport] = useState(false);
+  const [importUrl, setImportUrl] = useState('');
+  const [importing, setImporting] = useState(false);
 
   // Grocery list modal
   const [groceryList, setGroceryList] = useState<GroceryItem[] | null>(null);
@@ -255,6 +281,8 @@ export function MealPlanPage() {
       await api.post(`/families/${familyId}/meals/recipes`, {
         name: recipeForm.name.trim(),
         description: recipeForm.description.trim() || undefined,
+        imageUrl: recipeForm.imageUrl || undefined,
+        sourceUrl: recipeForm.sourceUrl || undefined,
         servings: parseInt(recipeForm.servings) || 4,
         prepTime: recipeForm.prepTime ? parseInt(recipeForm.prepTime) : undefined,
         cookTime: recipeForm.cookTime ? parseInt(recipeForm.cookTime) : undefined,
@@ -275,6 +303,64 @@ export function MealPlanPage() {
       toast.error('Erreur lors de la création');
     } finally {
       setCreatingRecipe(false);
+    }
+  };
+
+  // ── Import recipe from URL ───────────────────────────────────────────────
+
+  /**
+   * Hit the server-side importer, then map the draft it returns into the
+   * existing recipe-form shape (which uses string values for the number
+   * fields so they can be edited freely). The user ends up in the same
+   * creation modal they'd use manually, just with the fields filled in.
+   */
+  const importFromUrl = async () => {
+    if (!familyId || !importUrl.trim()) return;
+    setImporting(true);
+    try {
+      const { data } = await api.post<{ recipe: ImportedRecipe; warning?: string }>(
+        `/families/${familyId}/meals/recipes/import`,
+        { url: importUrl.trim() },
+      );
+      const r = data.recipe;
+
+      setRecipeForm({
+        name: r.name ?? '',
+        description: r.description ?? '',
+        servings: r.servings != null ? String(r.servings) : '4',
+        prepTime: r.prepTime != null ? String(r.prepTime) : '',
+        cookTime: r.cookTime != null ? String(r.cookTime) : '',
+        tags: (r.tags ?? []).join(', '),
+        ingredients:
+          r.ingredients && r.ingredients.length > 0
+            ? r.ingredients.map((i) => ({
+                name: i.name,
+                quantity: i.quantity ? String(i.quantity) : '',
+                unit: i.unit ?? '',
+              }))
+            : [{ name: '', quantity: '', unit: '' }],
+        instructions:
+          r.instructions && r.instructions.length > 0 ? r.instructions : [''],
+        imageUrl: r.imageUrl,
+        sourceUrl: r.sourceUrl ?? importUrl.trim(),
+      });
+
+      setShowUrlImport(false);
+      setImportUrl('');
+      setShowRecipeForm(true);
+
+      if (data.warning) {
+        toast(data.warning, { icon: 'ℹ️', duration: 5000 });
+      } else {
+        toast.success('Recette importée — vérifie puis enregistre');
+      }
+    } catch (err: unknown) {
+      const msg =
+        (err as { response?: { data?: { message?: string } } })?.response?.data?.message ||
+        "Impossible d'importer cette recette";
+      toast.error(msg);
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -492,8 +578,24 @@ export function MealPlanPage() {
       {/* ─── Recettes Tab ─────────────────────────────────────────────── */}
       {tab === 'recipes' && (
         <div>
-          <div className="flex justify-end mb-4">
-            <Button size="sm" onClick={() => setShowRecipeForm(true)}>
+          <div className="flex justify-end gap-2 mb-4">
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                setImportUrl('');
+                setShowUrlImport(true);
+              }}
+            >
+              <LinkIcon className="w-4 h-4 mr-1" /> Importer depuis une URL
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => {
+                setRecipeForm({ ...emptyRecipeForm });
+                setShowRecipeForm(true);
+              }}
+            >
               <Plus className="w-4 h-4 mr-1" /> Ajouter une recette
             </Button>
           </div>
@@ -506,11 +608,29 @@ export function MealPlanPage() {
             <EmptyState
               icon={<UtensilsCrossed className="w-12 h-12" />}
               title="Aucune recette"
-              description="Ajoutez vos recettes favorites"
+              description="Ajoutez vos recettes favorites ou importez-les depuis une URL"
               action={
-                <Button onClick={() => setShowRecipeForm(true)} size="sm">
-                  Ajouter
-                </Button>
+                <div className="flex gap-2 justify-center">
+                  <Button
+                    onClick={() => {
+                      setImportUrl('');
+                      setShowUrlImport(true);
+                    }}
+                    size="sm"
+                    variant="secondary"
+                  >
+                    <LinkIcon className="w-4 h-4 mr-1" /> Importer
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      setRecipeForm({ ...emptyRecipeForm });
+                      setShowRecipeForm(true);
+                    }}
+                    size="sm"
+                  >
+                    <Plus className="w-4 h-4 mr-1" /> Ajouter
+                  </Button>
+                </div>
               }
             />
           ) : (
@@ -567,6 +687,19 @@ export function MealPlanPage() {
                         ))}
                       </div>
                     )}
+                    {recipe.sourceUrl && (
+                      <a
+                        href={recipe.sourceUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="mt-2 inline-flex items-center gap-1 text-[10px] text-gray-400 hover:text-meals truncate max-w-full"
+                        title={recipe.sourceUrl}
+                      >
+                        <LinkIcon className="w-3 h-3 shrink-0" />
+                        <span className="truncate">Source</span>
+                      </a>
+                    )}
                   </div>
                 </div>
               ))}
@@ -618,14 +751,81 @@ export function MealPlanPage() {
         </div>
       </Modal>
 
+      {/* ─── URL Import Modal ─────────────────────────────────────────── */}
+      <Modal
+        isOpen={showUrlImport}
+        onClose={() => !importing && setShowUrlImport(false)}
+        title="Importer une recette depuis une URL"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-500">
+            Colle le lien d&apos;une recette (Marmiton, 750g, Cuisine Actuelle,
+            Allrecipes, etc.). Nous tentons d&apos;en extraire les ingrédients,
+            les étapes et les temps de préparation. Tu pourras corriger avant
+            d&apos;enregistrer.
+          </p>
+          <Input
+            label="URL"
+            type="url"
+            value={importUrl}
+            onChange={(e) => setImportUrl(e.target.value)}
+            placeholder="https://www.marmiton.org/recettes/..."
+            autoFocus
+          />
+          <div className="flex gap-2 justify-end">
+            <Button
+              variant="secondary"
+              onClick={() => setShowUrlImport(false)}
+              disabled={importing}
+            >
+              Annuler
+            </Button>
+            <Button
+              onClick={importFromUrl}
+              isLoading={importing}
+              disabled={!importUrl.trim()}
+            >
+              Importer
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
       {/* ─── Recipe Creation Modal ────────────────────────────────────── */}
       <Modal
         isOpen={showRecipeForm}
         onClose={() => setShowRecipeForm(false)}
-        title="Nouvelle recette"
+        title={recipeForm.sourceUrl ? 'Recette importée' : 'Nouvelle recette'}
         size="lg"
       >
         <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+          {recipeForm.imageUrl && (
+            <div className="rounded-lg overflow-hidden">
+              <img
+                src={recipeForm.imageUrl}
+                alt={recipeForm.name}
+                className="w-full h-40 object-cover"
+                onError={(e) => {
+                  // Some sites return image URLs that block hotlinking; hide on error
+                  // rather than showing a broken image.
+                  (e.currentTarget as HTMLImageElement).style.display = 'none';
+                }}
+              />
+            </div>
+          )}
+          {recipeForm.sourceUrl && (
+            <p className="text-xs text-gray-500 flex items-center gap-1">
+              <LinkIcon className="w-3 h-3" />
+              <a
+                href={recipeForm.sourceUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="truncate hover:underline"
+              >
+                {recipeForm.sourceUrl}
+              </a>
+            </p>
+          )}
           <Input
             label="Nom"
             value={recipeForm.name}
