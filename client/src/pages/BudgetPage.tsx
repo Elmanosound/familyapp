@@ -26,13 +26,21 @@ const categoryColors: Record<string, string> = {
   subscriptions: '#06b6d4', other: '#6b7280',
 };
 
+// Return "YYYY-MM-DD" in the user's local timezone. Using Date#toISOString
+// here would silently switch to UTC, so a selection made late in the evening
+// (Paris time) would round-trip as the previous day.
+function toLocalDateInputValue(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 export function BudgetPage() {
   const { activeFamily } = useFamilyStore();
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [goals, setGoals] = useState<BudgetGoal[]>([]);
   const [summary, setSummary] = useState<BudgetSummary | null>(null);
   const [showExpenseForm, setShowExpenseForm] = useState(false);
-  const [form, setForm] = useState({ amount: '', category: 'groceries', description: '', date: new Date().toISOString().slice(0, 10) });
+  const [form, setForm] = useState({ amount: '', category: 'groceries', description: '', date: toLocalDateInputValue(new Date()) });
 
   const fetchData = useCallback(async () => {
     if (!activeFamily) return;
@@ -56,7 +64,7 @@ export function BudgetPage() {
       date: new Date(form.date).toISOString(),
     });
     setShowExpenseForm(false);
-    setForm({ amount: '', category: 'groceries', description: '', date: new Date().toISOString().slice(0, 10) });
+    setForm({ amount: '', category: 'groceries', description: '', date: toLocalDateInputValue(new Date()) });
     fetchData();
     toast.success('Depense ajoutee');
   };
