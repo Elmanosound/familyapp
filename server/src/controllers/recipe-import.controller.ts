@@ -229,7 +229,14 @@ function findRecipeNode(node: unknown): JsonLd | null {
 
 function extractJsonLdBlocks(html: string): JsonLd[] {
   const blocks: JsonLd[] = [];
-  const re = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+
+  // Many sites use the literal `type="application/ld+json"`, but some
+  // (notably Marmiton) HTML-entity-encode the slash and plus sign:
+  //   type="application&#x2F;ld&#x2B;json"
+  // We match both forms so the regex covers all known variants.
+  const re =
+    /<script[^>]*type=["']application(?:\/|&#x2F;)ld(?:\+|&#x2B;)json["'][^>]*>([\s\S]*?)<\/script>/gi;
+
   let m;
   while ((m = re.exec(html)) !== null) {
     const raw = m[1].trim();
@@ -248,13 +255,31 @@ function extractJsonLdBlocks(html: string): JsonLd[] {
 
 // ─── OpenGraph fallback ──────────────────────────────────────────────────────
 
+/** Decode common HTML entities so we can match property names & extract content. */
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(parseInt(dec, 10)))
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>');
+}
+
 function metaContent(html: string, property: string): string | undefined {
-  const re = new RegExp(
-    `<meta[^>]+(?:property|name)=["']${property}["'][^>]+content=["']([^"']+)["']`,
-    'i',
-  );
-  const m = html.match(re);
-  return m ? stripHtml(m[1]) : undefined;
+  // Some sites (Marmiton) entity-encode properties — e.g. og&#x3A;title instead of og:title.
+  // We scan all <meta> tags, decode their attributes, then compare.
+  const re = /<meta\s+([^>]+)\/?>/gi;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    const attrs = decodeEntities(m[1]);
+    const propMatch = attrs.match(/(?:property|name)\s*=\s*["']([^"']+)["']/i);
+    const contMatch = attrs.match(/content\s*=\s*["']([^"']+)["']/i);
+    if (propMatch && contMatch && propMatch[1].toLowerCase() === property.toLowerCase()) {
+      return stripHtml(decodeEntities(contMatch[1]));
+    }
+  }
+  return undefined;
 }
 
 function extractTitle(html: string): string | undefined {
