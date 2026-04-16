@@ -243,7 +243,17 @@ function extractJsonLdBlocks(html: string): JsonLd[] {
     if (!raw) continue;
     try {
       // Some sites wrap in HTML comments or have trailing commas — try a gentle cleanup.
-      const cleaned = raw.replace(/^<!\[CDATA\[/, '').replace(/\]\]>$/, '').trim();
+      let cleaned = raw.replace(/^<!\[CDATA\[/, '').replace(/\]\]>$/, '').trim();
+
+      // Some sites (750g) embed raw \r\n or other control chars inside JSON
+      // string values which makes JSON.parse choke. Replace them with spaces.
+      // eslint-disable-next-line no-control-regex
+      cleaned = cleaned.replace(/[\x00-\x09\x0b\x0c\x0e-\x1f\x7f]/g, '');
+      // \r and \n inside JSON strings should become spaces; outside strings
+      // they're fine as whitespace — but doing a blanket replace is safe since
+      // they're never semantically meaningful in JSON.
+      cleaned = cleaned.replace(/\r\n?/g, ' ').replace(/\n/g, ' ');
+
       const parsed = JSON.parse(cleaned);
       blocks.push(parsed);
     } catch {
