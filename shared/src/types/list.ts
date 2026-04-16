@@ -1,4 +1,21 @@
-export type ListType = 'shopping' | 'todo' | 'custom';
+export type ListType = 'shopping' | 'todo' | 'inventory' | 'custom';
+
+/** Predefined categories for inventory lists. */
+export const INVENTORY_CATEGORIES = [
+  // Alimentaire
+  'Fruits & Legumes',
+  'Viandes & Poissons',
+  'Produits laitiers',
+  'Epicerie',
+  'Boissons',
+  'Surgeles',
+  // Maison
+  'Hygiene',
+  'Menage',
+  'Autre',
+] as const;
+
+export type InventoryCategory = (typeof INVENTORY_CATEGORIES)[number];
 
 export interface List {
   _id: string;

@@ -214,3 +214,85 @@ export async function generateGroceryList(req: Request, res: Response, next: Nex
     next(error);
   }
 }
+
+/**
+ * POST /families/:familyId/meals/plans/:planId/grocery/to-list
+ *
+ * Generates the grocery list for a meal plan, creates a new shopping list,
+ * and populates it with one item per ingredient. Returns the new list so
+ * the frontend can navigate to it or show a confirmation.
+ */
+export async function groceryToList(req: Request, res: Response, next: NextFunction) {
+  try {
+    const familyId = req.params.familyId as string;
+    const plan = await prisma.mealPlan.findUnique({
+      where: { id: (req.params.planId as string) },
+      include: { meals: { include: { recipe: true } } },
+    });
+    if (!plan) throw new NotFoundError('Meal plan');
+
+    // Build the same consolidated ingredient map as generateGroceryList.
+    const ingredientMap = new Map<string, { quantity: number; unit: string; fromRecipes: string[] }>();
+    const planWithMeals = plan as typeof plan & { meals: Array<{ recipe: { name: string; ingredients: unknown } | null }> };
+    for (const meal of planWithMeals.meals) {
+      const recipe = meal.recipe;
+      if (!recipe) continue;
+      const ingredients = (typeof recipe.ingredients === 'string'
+        ? JSON.parse(recipe.ingredients)
+        : recipe.ingredients) as { name: string; quantity: number; unit: string }[];
+      if (!ingredients) continue;
+      for (const ing of ingredients) {
+        const key = `${ing.name.toLowerCase()}-${ing.unit}`;
+        const existing = ingredientMap.get(key);
+        if (existing) {
+          existing.quantity += ing.quantity;
+          existing.fromRecipes.push(recipe.name);
+        } else {
+          ingredientMap.set(key, { quantity: ing.quantity, unit: ing.unit, fromRecipes: [recipe.name] });
+        }
+      }
+    }
+
+    const groceryItems = Array.from(ingredientMap.entries()).map(([key, val]) => ({
+      name: key.split('-')[0],
+      ...val,
+    }));
+
+    // Optional custom list name from body; default uses the week date.
+    const weekLabel = plan.weekStartDate.toISOString().slice(0, 10);
+    const listName = (req.body.name as string) || `Courses semaine du ${weekLabel}`;
+
+    // Create the shopping list + all items in a single transaction.
+    const list = await prisma.$transaction(async (tx) => {
+      const newList = await tx.list.create({
+        data: {
+          name: listName,
+          type: 'shopping',
+          familyId,
+          createdById: req.user!.id,
+        },
+      });
+
+      if (groceryItems.length > 0) {
+        await tx.listItem.createMany({
+          data: groceryItems.map((item, idx) => ({
+            listId: newList.id,
+            familyId,
+            text: item.name,
+            quantity: item.quantity || undefined,
+            unit: item.unit || undefined,
+            category: item.fromRecipes.join(', '),
+            sortOrder: idx,
+            addedById: req.user!.id,
+          })),
+        });
+      }
+
+      return newList;
+    });
+
+    res.status(201).json({ list, itemCount: groceryItems.length });
+  } catch (error) {
+    next(error);
+  }
+}

@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   UtensilsCrossed, Plus, Clock, Users, ChevronLeft, ChevronRight,
-  ShoppingCart, Trash2, X, Loader2, Link as LinkIcon,
+  ShoppingCart, Trash2, X, Loader2, Link as LinkIcon, ListPlus,
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import { Input } from '../components/ui/Input';
@@ -108,6 +109,7 @@ interface ImportedRecipe {
 export function MealPlanPage() {
   const { activeFamily } = useFamilyStore();
   const familyId = activeFamily?._id;
+  const navigate = useNavigate();
 
   const [tab, setTab] = useState<'planner' | 'recipes'>('planner');
 
@@ -144,6 +146,7 @@ export function MealPlanPage() {
   const [groceryList, setGroceryList] = useState<GroceryItem[] | null>(null);
   const [groceryOpen, setGroceryOpen] = useState(false);
   const [groceryLoading, setGroceryLoading] = useState(false);
+  const [sendingToList, setSendingToList] = useState(false);
 
   // ── Derived ──────────────────────────────────────────────────────────────
 
@@ -390,6 +393,24 @@ export function MealPlanPage() {
       toast.error('Erreur lors de la génération');
     } finally {
       setGroceryLoading(false);
+    }
+  };
+
+  // ── Send grocery list to a shopping list ──────────────────────────────────
+
+  const sendGroceryToList = async () => {
+    if (!familyId || !plan) return;
+    setSendingToList(true);
+    try {
+      await api.post(`/families/${familyId}/meals/plans/${plan.id}/grocery/to-list`);
+      toast.success('Liste de courses creee ! Redirection...');
+      setGroceryOpen(false);
+      // Navigate to the Lists page so the user can see the new list.
+      setTimeout(() => navigate('/lists'), 600);
+    } catch {
+      toast.error('Erreur lors de la creation de la liste');
+    } finally {
+      setSendingToList(false);
     }
   };
 
@@ -963,23 +984,34 @@ export function MealPlanPage() {
         size="lg"
       >
         {groceryList && groceryList.length > 0 ? (
-          <div className="space-y-2 max-h-[60vh] overflow-y-auto">
-            {groceryList.map((item, idx) => (
-              <div
-                key={idx}
-                className="flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-gray-800 rounded-lg"
-              >
-                <div>
-                  <p className="text-sm font-medium capitalize">{item.name}</p>
-                  <p className="text-[10px] text-gray-400">
-                    {item.fromRecipes.join(', ')}
-                  </p>
+          <div className="space-y-3">
+            <div className="space-y-2 max-h-[55vh] overflow-y-auto">
+              {groceryList.map((item, idx) => (
+                <div
+                  key={idx}
+                  className="flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-gray-800 rounded-lg"
+                >
+                  <div>
+                    <p className="text-sm font-medium capitalize">{item.name}</p>
+                    <p className="text-[10px] text-gray-400">
+                      {item.fromRecipes.join(', ')}
+                    </p>
+                  </div>
+                  <span className="text-sm text-gray-600 dark:text-gray-400">
+                    {item.quantity} {item.unit}
+                  </span>
                 </div>
-                <span className="text-sm text-gray-600 dark:text-gray-400">
-                  {item.quantity} {item.unit}
-                </span>
-              </div>
-            ))}
+              ))}
+            </div>
+            <Button
+              onClick={sendGroceryToList}
+              isLoading={sendingToList}
+              className="w-full"
+              size="lg"
+            >
+              <ListPlus className="w-4 h-4 mr-2" />
+              Envoyer vers les listes de courses
+            </Button>
           </div>
         ) : (
           <p className="text-sm text-gray-500 text-center py-4">Aucun ingrédient trouvé.</p>
