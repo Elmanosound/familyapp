@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  ListTodo, Plus, Check, Trash2, ShoppingCart, CheckSquare,
+  ListTodo, Plus, Check, Trash2, ShoppingCart, CheckSquare, Package,
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
@@ -47,6 +47,9 @@ export function ListsPage() {
 
   // ── Delete list confirmation ─────────────────────────────────────────────
   const [deletingListId, setDeletingListId] = useState<string | null>(null);
+
+  // ── Transfer to inventory ────────────────────────────────────────────────
+  const [transferring, setTransferring] = useState(false);
 
   // ── API helpers ──────────────────────────────────────────────────────────
 
@@ -137,6 +140,33 @@ export function ListsPage() {
       fetchItems(selectedList);
     } catch {
       toast.error('Erreur lors de la suppression');
+    }
+  };
+
+  // ── Derived: can we transfer to inventory? ─────────────────────────────
+
+  const isShopping = selectedList?.type === 'shopping';
+  const completedCount = useMemo(
+    () => items.filter((i) => i.isCompleted).length,
+    [items],
+  );
+
+  const transferToInventory = async () => {
+    if (!familyId || !selectedList) return;
+    setTransferring(true);
+    try {
+      const { data } = await api.post<{ transferredCount: number }>(
+        `/families/${familyId}/lists/${selectedList._id}/to-inventory`,
+      );
+      toast.success(`${data.transferredCount} produit${data.transferredCount > 1 ? 's' : ''} ajoute${data.transferredCount > 1 ? 's' : ''} a l'inventaire`);
+      fetchItems(selectedList);
+    } catch (err: unknown) {
+      const msg =
+        (err as { response?: { data?: { message?: string } } })?.response?.data?.message ||
+        "Erreur lors du transfert vers l'inventaire";
+      toast.error(msg);
+    } finally {
+      setTransferring(false);
     }
   };
 
@@ -307,6 +337,20 @@ export function ListsPage() {
               <div className="p-8 text-center text-gray-500">Liste vide</div>
             )}
           </div>
+          {/* Transfer to inventory button — only for shopping lists with checked items */}
+          {isShopping && completedCount > 0 && (
+            <div className="p-4 border-t border-gray-200 dark:border-gray-700">
+              <Button
+                onClick={transferToInventory}
+                isLoading={transferring}
+                className="w-full"
+                variant="secondary"
+              >
+                <Package className="w-4 h-4 mr-2" />
+                Ajouter {completedCount} produit{completedCount > 1 ? 's' : ''} coche{completedCount > 1 ? 's' : ''} a l&apos;inventaire
+              </Button>
+            </div>
+          )}
         </div>
       )}
 
