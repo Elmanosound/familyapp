@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import {
   getRecipes, createRecipe, getRecipe, updateRecipe, deleteRecipe,
-  getMealPlans, createOrUpdateMealPlan, generateGroceryList,
+  getMealPlans, createOrUpdateMealPlan, generateGroceryList, groceryToList,
 } from '../controllers/meal.controller.js';
 import { importRecipeFromUrl } from '../controllers/recipe-import.controller.js';
 import { protect } from '../middleware/auth.middleware.js';
@@ -22,5 +22,7 @@ router.delete('/recipes/:recipeId', deleteRecipe);
 router.get('/plans', getMealPlans);
 router.post('/plans', createOrUpdateMealPlan);
 router.get('/plans/:planId/grocery', generateGroceryList);
+// Creates a shopping list pre-populated with the grocery items.
+router.post('/plans/:planId/grocery/to-list', groceryToList);
 
 export default router;

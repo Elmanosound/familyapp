@@ -10,3 +10,4 @@ export type * from './types/meal';
 export type * from './types/socket-events';
 
 export { EXPENSE_CATEGORIES } from './types/budget';
+export { INVENTORY_CATEGORIES } from './types/list';
