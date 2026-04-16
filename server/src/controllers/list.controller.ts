@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { prisma } from '../config/db.js';
-import { NotFoundError } from '../utils/errors.js';
+import { NotFoundError, ValidationError } from '../utils/errors.js';
 
 const userNameSelect = { id: true, firstName: true, lastName: true };
 
@@ -140,6 +140,110 @@ export async function deleteItem(req: Request, res: Response, next: NextFunction
   try {
     await prisma.listItem.delete({ where: { id: (req.params.itemId as string) } });
     res.json({ message: 'Item deleted' });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * POST /families/:familyId/lists/:listId/to-inventory
+ *
+ * Takes the completed (checked) items from a shopping list and merges them
+ * into the family's inventory list. If an item with the same name already
+ * exists in the inventory, its quantity is incremented; otherwise a new
+ * item is created. Items that don't have a category get "Epicerie" by
+ * default. After transfer, the completed items are removed from the
+ * shopping list.
+ */
+export async function shoppingToInventory(req: Request, res: Response, next: NextFunction) {
+  try {
+    const familyId = req.params.familyId as string;
+    const listId = req.params.listId as string;
+
+    // 1. Validate: source must be a shopping list.
+    const sourceList = await prisma.list.findUnique({ where: { id: listId } });
+    if (!sourceList) throw new NotFoundError('List');
+    if (sourceList.type !== 'shopping') {
+      throw new ValidationError("Seule une liste de courses peut etre transferee vers l'inventaire");
+    }
+
+    // 2. Get completed items from the shopping list.
+    const completedItems = await prisma.listItem.findMany({
+      where: { listId, isCompleted: true },
+    });
+    if (completedItems.length === 0) {
+      throw new ValidationError("Aucun element coche a transferer");
+    }
+
+    // 3. Find or create the inventory list for this family.
+    let inventory = await prisma.list.findFirst({
+      where: { familyId, type: 'inventory', isArchived: false },
+    });
+    if (!inventory) {
+      inventory = await prisma.list.create({
+        data: {
+          name: 'Inventaire maison',
+          type: 'inventory',
+          familyId,
+          createdById: req.user!.id,
+        },
+      });
+    }
+
+    // 4. Load existing inventory items to detect duplicates by name.
+    const existingItems = await prisma.listItem.findMany({
+      where: { listId: inventory.id },
+    });
+    const existingByName = new Map(
+      existingItems.map((item) => [item.text.toLowerCase().trim(), item]),
+    );
+
+    // Default category for items without one.
+    const DEFAULT_CATEGORY = 'Epicerie';
+
+    // 5. Upsert in a transaction.
+    await prisma.$transaction(async (tx) => {
+      for (const item of completedItems) {
+        const key = item.text.toLowerCase().trim();
+        const existing = existingByName.get(key);
+
+        if (existing) {
+          // Increment quantity on the existing inventory item.
+          await tx.listItem.update({
+            where: { id: existing.id },
+            data: {
+              quantity: (existing.quantity ?? 0) + (item.quantity ?? 1),
+            },
+          });
+        } else {
+          // Create a new inventory item.
+          await tx.listItem.create({
+            data: {
+              listId: inventory.id,
+              familyId,
+              text: item.text,
+              quantity: item.quantity ?? 1,
+              unit: item.unit ?? undefined,
+              category: DEFAULT_CATEGORY,
+              addedById: req.user!.id,
+            },
+          });
+        }
+      }
+
+      // 6. Remove the transferred items from the shopping list.
+      await tx.listItem.deleteMany({
+        where: {
+          listId,
+          isCompleted: true,
+        },
+      });
+    });
+
+    res.json({
+      message: 'Produits ajoutes a l\'inventaire',
+      transferredCount: completedItems.length,
+    });
   } catch (error) {
     next(error);
   }
