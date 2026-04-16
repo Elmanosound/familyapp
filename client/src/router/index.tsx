@@ -6,6 +6,7 @@ import { RegisterPage } from '../pages/RegisterPage';
 import { DashboardPage } from '../pages/DashboardPage';
 import { CalendarPage } from '../pages/CalendarPage';
 import { ListsPage } from '../pages/ListsPage';
+import { InventoryPage } from '../pages/InventoryPage';
 import { ChatPage } from '../pages/ChatPage';
 import { MediaPage } from '../pages/MediaPage';
 import { LocationPage } from '../pages/LocationPage';
@@ -39,6 +40,7 @@ export function AppRouter() {
           <Route path="dashboard" element={<DashboardPage />} />
           <Route path="calendar" element={<CalendarPage />} />
           <Route path="lists" element={<ListsPage />} />
+          <Route path="inventory" element={<InventoryPage />} />
           <Route path="chat" element={<ChatPage />} />
           <Route path="media" element={<MediaPage />} />
           <Route path="location" element={<LocationPage />} />

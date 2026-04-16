@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom';
 import { clsx } from 'clsx';
 import {
   LayoutDashboard, Calendar, ListTodo, MessageCircle, Image,
-  MapPin, Wallet, UtensilsCrossed, Settings, LogOut, ChevronDown, Users,
+  MapPin, Wallet, UtensilsCrossed, Settings, LogOut, ChevronDown, Users, Package,
 } from 'lucide-react';
 import { useAuthStore } from '../../stores/authStore';
 import { useFamilyStore } from '../../stores/familyStore';
@@ -13,6 +13,7 @@ const navItems = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Tableau de bord', color: 'text-primary-600' },
   { to: '/calendar', icon: Calendar, label: 'Calendrier', color: 'text-calendar' },
   { to: '/lists', icon: ListTodo, label: 'Listes', color: 'text-lists' },
+  { to: '/inventory', icon: Package, label: 'Inventaire', color: 'text-emerald-500' },
   { to: '/chat', icon: MessageCircle, label: 'Messagerie', color: 'text-chat' },
   { to: '/media', icon: Image, label: 'Photos', color: 'text-media' },
   { to: '/location', icon: MapPin, label: 'Localisation', color: 'text-location' },

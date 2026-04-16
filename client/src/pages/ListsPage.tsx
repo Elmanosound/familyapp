@@ -1,7 +1,6 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   ListTodo, Plus, Check, Trash2, ShoppingCart, CheckSquare,
-  Package, Minus, ChevronDown, ChevronRight,
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
@@ -10,7 +9,6 @@ import { EmptyState } from '../components/ui/EmptyState';
 import { useFamilyStore } from '../stores/familyStore';
 import api from '../config/api';
 import type { List, ListItem, ListType } from '@familyapp/shared';
-import { INVENTORY_CATEGORIES } from '@familyapp/shared';
 import toast from 'react-hot-toast';
 import { clsx } from 'clsx';
 
@@ -19,7 +17,6 @@ import { clsx } from 'clsx';
 const LIST_TYPE_META: Record<string, { icon: typeof ShoppingCart; label: string; color: string }> = {
   shopping: { icon: ShoppingCart, label: 'Courses', color: 'text-orange-500' },
   todo: { icon: CheckSquare, label: 'Taches', color: 'text-lists' },
-  inventory: { icon: Package, label: 'Inventaire', color: 'text-emerald-500' },
   custom: { icon: ListTodo, label: 'Personnalisee', color: 'text-lists' },
 };
 
@@ -47,18 +44,9 @@ export function ListsPage() {
 
   // ── Add item state ───────────────────────────────────────────────────────
   const [newItemText, setNewItemText] = useState('');
-  // Inventory-specific fields for adding items
-  const [newItemCategory, setNewItemCategory] = useState<string>(INVENTORY_CATEGORIES[0]);
-  const [newItemQuantity, setNewItemQuantity] = useState('1');
-  const [newItemUnit, setNewItemUnit] = useState('');
-
-  // ── Collapsible category sections (inventory view) ───────────────────────
-  const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
 
   // ── Delete list confirmation ─────────────────────────────────────────────
   const [deletingListId, setDeletingListId] = useState<string | null>(null);
-
-  const isInventory = selectedList?.type === 'inventory';
 
   // ── API helpers ──────────────────────────────────────────────────────────
 
@@ -66,7 +54,10 @@ export function ListsPage() {
     if (!familyId) return;
     try {
       const { data } = await api.get(`/families/${familyId}/lists`);
-      setLists(data.lists);
+      // Filter out inventory lists — they live on their own page now.
+      setLists((data.lists as (List & { itemCount: number; completedCount: number })[]).filter(
+        (l) => l.type !== 'inventory',
+      ));
     } catch {
       toast.error('Erreur lors du chargement des listes');
     }
@@ -117,16 +108,10 @@ export function ListsPage() {
   const addItem = async () => {
     if (!familyId || !selectedList || !newItemText.trim()) return;
     try {
-      const payload: Record<string, unknown> = { text: newItemText.trim() };
-      if (isInventory) {
-        payload.category = newItemCategory;
-        payload.quantity = parseFloat(newItemQuantity) || 1;
-        if (newItemUnit.trim()) payload.unit = newItemUnit.trim();
-      }
-      await api.post(`/families/${familyId}/lists/${selectedList._id}/items`, payload);
+      await api.post(`/families/${familyId}/lists/${selectedList._id}/items`, {
+        text: newItemText.trim(),
+      });
       setNewItemText('');
-      setNewItemQuantity('1');
-      setNewItemUnit('');
       fetchItems(selectedList);
     } catch {
       toast.error("Erreur lors de l'ajout");
@@ -145,23 +130,6 @@ export function ListsPage() {
     }
   };
 
-  const updateItemQuantity = async (item: ListItem, delta: number) => {
-    if (!familyId || !selectedList) return;
-    const newQty = Math.max(0, (item.quantity ?? 0) + delta);
-    try {
-      if (newQty === 0) {
-        await api.delete(`/families/${familyId}/lists/${selectedList._id}/items/${item._id}`);
-      } else {
-        await api.patch(`/families/${familyId}/lists/${selectedList._id}/items/${item._id}`, {
-          quantity: newQty,
-        });
-      }
-      fetchItems(selectedList);
-    } catch {
-      toast.error('Erreur lors de la modification');
-    }
-  };
-
   const deleteItem = async (itemId: string) => {
     if (!familyId || !selectedList) return;
     try {
@@ -171,39 +139,6 @@ export function ListsPage() {
       toast.error('Erreur lors de la suppression');
     }
   };
-
-  // ── Group items by category for inventory view ───────────────────────────
-
-  const groupedItems = useMemo(() => {
-    if (!isInventory) return null;
-    const groups = new Map<string, ListItem[]>();
-    for (const item of items) {
-      const cat = item.category || 'Autre';
-      if (!groups.has(cat)) groups.set(cat, []);
-      groups.get(cat)!.push(item);
-    }
-    // Sort categories in INVENTORY_CATEGORIES order
-    const ordered: [string, ListItem[]][] = [];
-    for (const cat of INVENTORY_CATEGORIES) {
-      if (groups.has(cat)) {
-        ordered.push([cat, groups.get(cat)!]);
-        groups.delete(cat);
-      }
-    }
-    // Append any remaining categories not in the predefined list
-    for (const [cat, catItems] of groups) {
-      ordered.push([cat, catItems]);
-    }
-    return ordered;
-  }, [items, isInventory]);
-
-  const toggleCategory = (cat: string) =>
-    setCollapsedCategories((prev) => {
-      const next = new Set(prev);
-      if (next.has(cat)) next.delete(cat);
-      else next.add(cat);
-      return next;
-    });
 
   // ── Render ─────────────────────────────────────────────────────────────
 
@@ -252,7 +187,7 @@ export function ListsPage() {
           <EmptyState
             icon={<ListTodo className="w-12 h-12" />}
             title="Aucune liste"
-            description="Creez une liste de courses, de taches ou un inventaire maison"
+            description="Creez une liste de courses ou de taches"
             action={
               <Button onClick={() => setShowCreate(true)} size="sm">
                 Creer une liste
@@ -276,27 +211,21 @@ export function ListsPage() {
                       </span>
                     </div>
                   </div>
-                  {list.type !== 'inventory' ? (
-                    <div className="flex items-center gap-2">
-                      <div className="flex-1 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                        <div
-                          className="bg-lists h-2 rounded-full transition-all"
-                          style={{
-                            width: list.itemCount
-                              ? `${(list.completedCount / list.itemCount) * 100}%`
-                              : '0%',
-                          }}
-                        />
-                      </div>
-                      <span className="text-xs text-gray-500">
-                        {list.completedCount}/{list.itemCount}
-                      </span>
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                      <div
+                        className="bg-lists h-2 rounded-full transition-all"
+                        style={{
+                          width: list.itemCount
+                            ? `${(list.completedCount / list.itemCount) * 100}%`
+                            : '0%',
+                        }}
+                      />
                     </div>
-                  ) : (
                     <span className="text-xs text-gray-500">
-                      {list.itemCount} produit{list.itemCount !== 1 ? 's' : ''}
+                      {list.completedCount}/{list.itemCount}
                     </span>
-                  )}
+                  </div>
                 </button>
                 {/* Delete button */}
                 <button
@@ -315,8 +244,8 @@ export function ListsPage() {
         )
       )}
 
-      {/* ─── Standard list view (shopping / todo) ───────────────────────── */}
-      {selectedList && !isInventory && (
+      {/* ─── List items view ────────────────────────────────────────────── */}
+      {selectedList && (
         <div className="card">
           <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex gap-2">
             <Input
@@ -381,132 +310,6 @@ export function ListsPage() {
         </div>
       )}
 
-      {/* ─── Inventory view ─────────────────────────────────────────────── */}
-      {selectedList && isInventory && (
-        <div className="space-y-4">
-          {/* Add inventory item — form with category, quantity, unit */}
-          <div className="card p-4">
-            <div className="flex flex-wrap gap-2 items-end">
-              <div className="flex-1 min-w-[140px]">
-                <Input
-                  label="Produit"
-                  value={newItemText}
-                  onChange={(e) => setNewItemText(e.target.value)}
-                  placeholder="Nom du produit..."
-                  onKeyDown={(e) => e.key === 'Enter' && addItem()}
-                />
-              </div>
-              <div className="w-24">
-                <Input
-                  label="Qte"
-                  type="number"
-                  value={newItemQuantity}
-                  onChange={(e) => setNewItemQuantity(e.target.value)}
-                  min="0"
-                />
-              </div>
-              <div className="w-24">
-                <Input
-                  label="Unite"
-                  value={newItemUnit}
-                  onChange={(e) => setNewItemUnit(e.target.value)}
-                  placeholder="g, L, pcs"
-                />
-              </div>
-              <div className="w-44">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Categorie
-                </label>
-                <select
-                  value={newItemCategory}
-                  onChange={(e) => setNewItemCategory(e.target.value)}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 focus:ring-2 focus:ring-blue-500 outline-none"
-                >
-                  {INVENTORY_CATEGORIES.map((cat) => (
-                    <option key={cat} value={cat}>
-                      {cat}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <Button onClick={addItem} size="sm" className="shrink-0">
-                <Plus className="w-4 h-4 mr-1" /> Ajouter
-              </Button>
-            </div>
-          </div>
-
-          {/* Grouped items by category */}
-          {groupedItems && groupedItems.length > 0 ? (
-            groupedItems.map(([category, catItems]) => {
-              const collapsed = collapsedCategories.has(category);
-              return (
-                <div key={category} className="card overflow-hidden">
-                  <button
-                    onClick={() => toggleCategory(category)}
-                    className="w-full flex items-center gap-2 px-4 py-3 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-750 transition-colors"
-                  >
-                    {collapsed ? (
-                      <ChevronRight className="w-4 h-4 text-gray-400" />
-                    ) : (
-                      <ChevronDown className="w-4 h-4 text-gray-400" />
-                    )}
-                    <span className="text-sm font-semibold">{category}</span>
-                    <span className="text-xs text-gray-400 ml-auto">
-                      {catItems.length} produit{catItems.length !== 1 ? 's' : ''}
-                    </span>
-                  </button>
-                  {!collapsed && (
-                    <div className="divide-y divide-gray-100 dark:divide-gray-700">
-                      {catItems.map((item) => (
-                        <div
-                          key={item._id}
-                          className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-800"
-                        >
-                          <span className="flex-1 text-sm font-medium">
-                            {item.text}
-                          </span>
-                          {/* Quantity controls */}
-                          <div className="flex items-center gap-1">
-                            <button
-                              onClick={() => updateItemQuantity(item, -1)}
-                              className="p-1 rounded bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300"
-                            >
-                              <Minus className="w-3.5 h-3.5" />
-                            </button>
-                            <span className="text-sm font-medium min-w-[40px] text-center">
-                              {item.quantity ?? 0}
-                              {item.unit ? (
-                                <span className="text-xs text-gray-400 ml-0.5">{item.unit}</span>
-                              ) : null}
-                            </span>
-                            <button
-                              onClick={() => updateItemQuantity(item, 1)}
-                              className="p-1 rounded bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300"
-                            >
-                              <Plus className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                          <button
-                            onClick={() => deleteItem(item._id)}
-                            className="p-1 text-gray-300 hover:text-red-500"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })
-          ) : (
-            <div className="card p-8 text-center text-gray-500">
-              Inventaire vide — ajoutez des produits ci-dessus
-            </div>
-          )}
-        </div>
-      )}
-
       {/* ─── Create list modal ──────────────────────────────────────────── */}
       <Modal
         isOpen={showCreate}
@@ -527,7 +330,6 @@ export function ListsPage() {
                 [
                   { key: 'todo', label: 'Taches', icon: CheckSquare },
                   { key: 'shopping', label: 'Courses', icon: ShoppingCart },
-                  { key: 'inventory', label: 'Inventaire', icon: Package },
                 ] as const
               ).map(({ key, label, icon: Icon }) => (
                 <button
