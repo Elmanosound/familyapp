@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  Package, Plus, Minus, Trash2, ChevronDown, ChevronRight, Loader2,
+  Package, Plus, Minus, Trash2, ChevronDown, ChevronRight, Loader2, Pencil,
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
@@ -37,6 +37,11 @@ export function InventoryPage() {
 
   // ── Delete confirmation ──────────────────────────────────────────────────
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  // ── Edit item modal ─────────────────────────────────────────────────────
+  const [editingItem, setEditingItem] = useState<ListItem | null>(null);
+  const [editForm, setEditForm] = useState({ text: '', quantity: '', unit: '', category: '' });
+  const [savingEdit, setSavingEdit] = useState(false);
 
   // ── Load or auto-create inventory ────────────────────────────────────────
 
@@ -139,6 +144,39 @@ export function InventoryPage() {
       toast.success('Inventaire vide');
     } catch {
       toast.error('Erreur lors de la suppression');
+    }
+  };
+
+  // ── Edit item ────────────────────────────────────────────────────────────
+
+  const openEdit = (item: ListItem) => {
+    setEditForm({
+      text: item.text,
+      quantity: item.quantity != null ? String(item.quantity) : '1',
+      unit: item.unit ?? '',
+      category: item.category || 'Autre',
+    });
+    setEditingItem(item);
+  };
+
+  const saveEdit = async () => {
+    if (!familyId || !inventory || !editingItem || !editForm.text.trim()) return;
+    setSavingEdit(true);
+    try {
+      await api.patch(`/families/${familyId}/lists/${inventory._id}/items/${editingItem._id}`, {
+        text: editForm.text.trim(),
+        quantity: parseFloat(editForm.quantity) || 1,
+        unit: editForm.unit.trim() || null,
+        category: editForm.category,
+      });
+      setEditingItem(null);
+      const { data } = await api.get(`/families/${familyId}/lists/${inventory._id}`);
+      setItems(data.items);
+      toast.success('Produit modifie');
+    } catch {
+      toast.error('Erreur lors de la modification');
+    } finally {
+      setSavingEdit(false);
     }
   };
 
@@ -286,9 +324,9 @@ export function InventoryPage() {
                     {catItems.map((item) => (
                       <div
                         key={item._id}
-                        className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-800"
+                        className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-800 group/item"
                       >
-                        <span className="flex-1 text-sm font-medium">{item.text}</span>
+                        <span className="flex-1 text-sm font-medium truncate">{item.text}</span>
                         {/* Quantity controls */}
                         <div className="flex items-center gap-1">
                           <button
@@ -311,8 +349,16 @@ export function InventoryPage() {
                           </button>
                         </div>
                         <button
+                          onClick={() => openEdit(item)}
+                          className="p-1 text-gray-300 hover:text-blue-500 opacity-0 group-hover/item:opacity-100 transition-opacity"
+                          title="Modifier"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        <button
                           onClick={() => deleteItem(item._id)}
-                          className="p-1 text-gray-300 hover:text-red-500"
+                          className="p-1 text-gray-300 hover:text-red-500 opacity-0 group-hover/item:opacity-100 transition-opacity"
+                          title="Supprimer"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -351,6 +397,66 @@ export function InventoryPage() {
               onClick={clearAll}
             >
               Tout supprimer
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ─── Edit item modal ───────────────────────────────────────────── */}
+      <Modal
+        isOpen={!!editingItem}
+        onClose={() => !savingEdit && setEditingItem(null)}
+        title="Modifier le produit"
+      >
+        <div className="space-y-4">
+          <Input
+            label="Nom du produit"
+            value={editForm.text}
+            onChange={(e) => setEditForm((f) => ({ ...f, text: e.target.value }))}
+            required
+            autoFocus
+          />
+          <div className="grid grid-cols-2 gap-3">
+            <Input
+              label="Quantite"
+              type="number"
+              value={editForm.quantity}
+              onChange={(e) => setEditForm((f) => ({ ...f, quantity: e.target.value }))}
+              min="0"
+            />
+            <Input
+              label="Unite"
+              value={editForm.unit}
+              onChange={(e) => setEditForm((f) => ({ ...f, unit: e.target.value }))}
+              placeholder="g, L, pcs"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Categorie
+            </label>
+            <select
+              value={editForm.category}
+              onChange={(e) => setEditForm((f) => ({ ...f, category: e.target.value }))}
+              className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 focus:ring-2 focus:ring-blue-500 outline-none"
+            >
+              {INVENTORY_CATEGORIES.map((cat) => (
+                <option key={cat} value={cat}>
+                  {cat}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex gap-2 justify-end">
+            <Button variant="secondary" onClick={() => setEditingItem(null)} disabled={savingEdit}>
+              Annuler
+            </Button>
+            <Button
+              onClick={saveEdit}
+              isLoading={savingEdit}
+              disabled={!editForm.text.trim()}
+            >
+              Enregistrer
             </Button>
           </div>
         </div>
