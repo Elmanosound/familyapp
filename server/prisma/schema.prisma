@@ -50,6 +50,7 @@ model User {
   goalContributions        GoalContribution[]
   envelopesCreated         BudgetEnvelope[]
   recurringExpensesCreated RecurringExpense[]
+  incomesReceived          Income[]
   recipesCreated      Recipe[]
   mealPlansCreated    MealPlan[]
   invitationsSent     Invitation[]
@@ -84,6 +85,7 @@ model Family {
   budgetGoals       BudgetGoal[]
   budgetEnvelopes   BudgetEnvelope[]
   recurringExpenses RecurringExpense[]
+  incomes           Income[]
   recipes        Recipe[]
   mealPlans      MealPlan[]
 
@@ -488,6 +490,26 @@ model RecurringExpense {
 
   @@index([familyId, nextDueDate])
   @@map("recurring_expenses")
+}
+
+model Income {
+  id           String   @id @default(uuid())
+  familyId     String
+  amount       Float
+  currency     String   @default("EUR")
+  category     String   // salary, freelance, rental, investment, gift, other
+  description  String?
+  date         DateTime
+  receivedById String
+  isRecurring  Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  family     Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  receivedBy User   @relation(fields: [receivedById], references: [id])
+
+  @@index([familyId, date(sort: Desc)])
+  @@map("incomes")
 }
 
 // ─── MEALS ─────────────────────────────────────────────────
