@@ -48,6 +48,7 @@ model User {
   expenseSplits       ExpenseSplit[]
   goalsCreated        BudgetGoal[]
   goalContributions   GoalContribution[]
+  envelopesCreated    BudgetEnvelope[]
   recipesCreated      Recipe[]
   mealPlansCreated    MealPlan[]
   invitationsSent     Invitation[]
@@ -78,8 +79,9 @@ model Family {
   albums         Album[]
   locations      Location[]
   geofences      Geofence[]
-  expenses       Expense[]
-  budgetGoals    BudgetGoal[]
+  expenses        Expense[]
+  budgetGoals     BudgetGoal[]
+  budgetEnvelopes BudgetEnvelope[]
   recipes        Recipe[]
   mealPlans      MealPlan[]
 
@@ -435,6 +437,28 @@ model GoalContribution {
   user User       @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("goal_contributions")
+}
+
+model BudgetEnvelope {
+  id             String   @id @default(uuid())
+  familyId       String
+  name           String
+  budgetedAmount Float
+  currency       String   @default("EUR")
+  period         String   @default("monthly") // monthly, weekly, yearly
+  category       String?  // optional: auto-link to an expense category
+  color          String   @default("#3b82f6")
+  icon           String?
+  createdById    String
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  family    Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  createdBy User   @relation(fields: [createdById], references: [id])
+
+  @@index([familyId])
+  @@map("budget_envelopes")
 }
 
 // ─── MEALS ─────────────────────────────────────────────────
