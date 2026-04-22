@@ -44,11 +44,12 @@ model User {
   mediaLikes          MediaLike[]
   mediaComments       MediaComment[]
   albumsCreated       Album[]
-  expensesPaid        Expense[]
-  expenseSplits       ExpenseSplit[]
-  goalsCreated        BudgetGoal[]
-  goalContributions   GoalContribution[]
-  envelopesCreated    BudgetEnvelope[]
+  expensesPaid             Expense[]
+  expenseSplits            ExpenseSplit[]
+  goalsCreated             BudgetGoal[]
+  goalContributions        GoalContribution[]
+  envelopesCreated         BudgetEnvelope[]
+  recurringExpensesCreated RecurringExpense[]
   recipesCreated      Recipe[]
   mealPlansCreated    MealPlan[]
   invitationsSent     Invitation[]
@@ -79,9 +80,10 @@ model Family {
   albums         Album[]
   locations      Location[]
   geofences      Geofence[]
-  expenses        Expense[]
-  budgetGoals     BudgetGoal[]
-  budgetEnvelopes BudgetEnvelope[]
+  expenses          Expense[]
+  budgetGoals       BudgetGoal[]
+  budgetEnvelopes   BudgetEnvelope[]
+  recurringExpenses RecurringExpense[]
   recipes        Recipe[]
   mealPlans      MealPlan[]
 
@@ -372,21 +374,23 @@ model Album {
 // ─── BUDGET ────────────────────────────────────────────────
 
 model Expense {
-  id          String   @id @default(uuid())
-  familyId    String
-  amount      Float
-  currency    String   @default("EUR")
-  category    String
-  description String?
-  date        DateTime
-  paidById    String
-  receiptUrl  String?
-  isRecurring Boolean  @default(false)
-  createdAt   DateTime @default(now())
+  id                  String   @id @default(uuid())
+  familyId            String
+  amount              Float
+  currency            String   @default("EUR")
+  category            String
+  description         String?
+  date                DateTime
+  paidById            String
+  receiptUrl          String?
+  isRecurring         Boolean  @default(false)
+  recurringExpenseId  String?
+  createdAt           DateTime @default(now())
 
-  family  Family         @relation(fields: [familyId], references: [id], onDelete: Cascade)
-  paidBy  User           @relation(fields: [paidById], references: [id])
-  splits  ExpenseSplit[]
+  family            Family            @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  paidBy            User              @relation(fields: [paidById], references: [id])
+  splits            ExpenseSplit[]
+  recurringExpense  RecurringExpense? @relation(fields: [recurringExpenseId], references: [id], onDelete: SetNull)
 
   @@index([familyId, date(sort: Desc)])
   @@index([familyId, category])
@@ -459,6 +463,31 @@ model BudgetEnvelope {
 
   @@index([familyId])
   @@map("budget_envelopes")
+}
+
+model RecurringExpense {
+  id          String    @id @default(uuid())
+  familyId    String
+  name        String
+  amount      Float
+  currency    String    @default("EUR")
+  category    String
+  description String?
+  frequency   String    @default("monthly") // weekly, monthly, quarterly, yearly
+  startDate   DateTime
+  nextDueDate DateTime
+  lastPaidAt  DateTime?
+  isActive    Boolean   @default(true)
+  createdById String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  family    Family    @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  createdBy User      @relation(fields: [createdById], references: [id])
+  expenses  Expense[]
+
+  @@index([familyId, nextDueDate])
+  @@map("recurring_expenses")
 }
 
 // ─── MEALS ─────────────────────────────────────────────────

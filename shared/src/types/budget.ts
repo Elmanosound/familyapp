@@ -95,6 +95,41 @@ export interface CreateEnvelopeData {
   icon?: string;
 }
 
+export const RECURRING_FREQUENCIES = ['weekly', 'monthly', 'quarterly', 'yearly'] as const;
+export type RecurringFrequency = (typeof RECURRING_FREQUENCIES)[number];
+
+export const RECURRING_FREQUENCY_LABELS: Record<RecurringFrequency, string> = {
+  weekly: 'Hebdomadaire',
+  monthly: 'Mensuel',
+  quarterly: 'Trimestriel',
+  yearly: 'Annuel',
+};
+
+/** Factor to convert this frequency's amount into a monthly equivalent. */
+export const RECURRING_MONTHLY_FACTOR: Record<RecurringFrequency, number> = {
+  weekly: 52 / 12,   // ≈ 4.33
+  monthly: 1,
+  quarterly: 1 / 3,
+  yearly: 1 / 12,
+};
+
+export interface RecurringExpense {
+  _id: string;
+  familyId: string;
+  name: string;
+  amount: number;
+  currency: string;
+  category: string;
+  description?: string | null;
+  frequency: RecurringFrequency;
+  startDate: string;
+  nextDueDate: string;
+  lastPaidAt?: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface BudgetSummary {
   totalSpent: number;
   byCategory: { category: string; total: number }[];

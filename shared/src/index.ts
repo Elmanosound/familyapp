@@ -9,5 +9,5 @@ export type * from './types/budget';
 export type * from './types/meal';
 export type * from './types/socket-events';
 
-export { EXPENSE_CATEGORIES } from './types/budget';
+export { EXPENSE_CATEGORIES, RECURRING_FREQUENCIES, RECURRING_FREQUENCY_LABELS, RECURRING_MONTHLY_FACTOR } from './types/budget';
 export { INVENTORY_CATEGORIES } from './types/list';
