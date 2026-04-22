@@ -28,7 +28,10 @@ COPY client/package.json ./client/
 # npm workspaces hoist most deps to /app/node_modules — we only need
 # that single directory to reach every package. Including dev deps
 # because the build stage compiles TypeScript and runs Vite.
-RUN npm ci --workspaces --include-workspace-root
+# --mount=type=cache keeps the npm registry cache between CI runs so
+# subsequent builds skip downloading unchanged packages entirely.
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --workspaces --include-workspace-root
 
 
 # ─── Stage 3: build shared → server → client ────────────────
