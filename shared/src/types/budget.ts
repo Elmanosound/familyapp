@@ -19,19 +19,19 @@ export interface Expense {
   familyId: string;
   amount: number;
   currency: string;
-  category: ExpenseCategory;
+  category: string;
   description: string;
   date: string;
-  paidBy: string;
+  paidBy: { id: string; firstName: string; lastName: string };
   splitBetween?: string[];
   receiptUrl?: string;
   isRecurring: boolean;
   createdAt: string;
-  updatedAt: string;
 }
 
 export interface BudgetGoalContribution {
-  user: string;
+  _id: string;
+  user: { id: string; firstName: string; lastName: string };
   amount: number;
   date: string;
   note?: string;
@@ -46,16 +46,32 @@ export interface BudgetGoal {
   currency: string;
   deadline?: string;
   icon?: string;
-  createdBy: string;
+  createdBy: { id: string; firstName: string; lastName: string };
   contributions: BudgetGoalContribution[];
   isCompleted: boolean;
   createdAt: string;
   updatedAt: string;
 }
 
+export interface BudgetEnvelope {
+  _id: string;
+  familyId: string;
+  name: string;
+  budgetedAmount: number;
+  currency: string;
+  period: 'monthly' | 'weekly' | 'yearly';
+  category?: string | null;
+  color: string;
+  icon?: string | null;
+  isActive: boolean;
+  spentAmount: number; // computed server-side
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface CreateExpenseData {
   amount: number;
-  category: ExpenseCategory;
+  category: string;
   description: string;
   date: string;
   splitBetween?: string[];
@@ -69,8 +85,19 @@ export interface CreateGoalData {
   icon?: string;
 }
 
+export interface CreateEnvelopeData {
+  name: string;
+  budgetedAmount: number;
+  currency?: string;
+  period?: 'monthly' | 'weekly' | 'yearly';
+  category?: string;
+  color?: string;
+  icon?: string;
+}
+
 export interface BudgetSummary {
   totalSpent: number;
-  byCategory: { category: ExpenseCategory; total: number }[];
+  byCategory: { category: string; total: number }[];
   monthlyTrend: { month: string; total: number }[];
+  period: { year: number; month: number };
 }
