@@ -1,15 +1,19 @@
 # ============================================================
 #  FamilyApp — Docker Compose stack
 #
-#  Usage:
+#  Usage (VM / NAS — no build required):
 #    cp .env.docker.example .env
 #    # Edit .env (set POSTGRES_PASSWORD, JWT_SECRET, JWT_REFRESH_SECRET)
-#    docker compose up -d
+#    docker compose pull && docker compose up -d
 #
-#  Then open http://localhost:8080
+#  The image is built automatically by GitHub Actions on every push
+#  to main and pushed to ghcr.io. The VM only pulls — no compiler
+#  needed, deployment takes ~30 seconds instead of 80+ minutes.
+#
+#  To force a local build (dev):
+#    docker compose build && docker compose up -d
 #
 #  Works identically on:
-#    - your local machine (dev preview of prod build)
 #    - a Compute Engine e2-micro VM (GCP free tier)
 #    - your home NAS (Ubuntu)
 # ============================================================
@@ -36,10 +40,9 @@ services:
     #   - "5432:5432"
 
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: familyapp:latest
+    # Image built by GitHub Actions and pushed to ghcr.io on every
+    # merge to main. The VM just pulls — no build step, no compiler.
+    image: ghcr.io/elmanosound/familyapp:latest
     container_name: familyapp-app
     restart: unless-stopped
     depends_on:
