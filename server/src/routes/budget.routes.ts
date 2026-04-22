@@ -4,6 +4,8 @@ import {
   getBudgetSummary,
   getGoals, createGoal, updateGoal, deleteGoal, contributeToGoal,
   getEnvelopes, createEnvelope, updateEnvelope, deleteEnvelope,
+  getRecurringExpenses, createRecurringExpense, updateRecurringExpense,
+  deleteRecurringExpense, payRecurringExpense,
 } from '../controllers/budget.controller.js';
 import { protect } from '../middleware/auth.middleware.js';
 import { requireFamilyMember } from '../middleware/family.middleware.js';
@@ -33,5 +35,12 @@ router.get('/envelopes', getEnvelopes);
 router.post('/envelopes', createEnvelope);
 router.patch('/envelopes/:envelopeId', updateEnvelope);
 router.delete('/envelopes/:envelopeId', deleteEnvelope);
+
+// Recurring expenses
+router.get('/recurring', getRecurringExpenses);
+router.post('/recurring', createRecurringExpense);
+router.patch('/recurring/:recurringId', updateRecurringExpense);
+router.delete('/recurring/:recurringId', deleteRecurringExpense);
+router.post('/recurring/:recurringId/pay', payRecurringExpense);
 
 export default router;

@@ -387,3 +387,127 @@ export async function deleteEnvelope(req: Request, res: Response, next: NextFunc
     next(error);
   }
 }
+
+// ─── Recurring Expenses ───────────────────────────────────────────────────────
+
+function advanceNextDueDate(from: Date, frequency: string): Date {
+  const d = new Date(from);
+  switch (frequency) {
+    case 'weekly':    d.setDate(d.getDate() + 7); break;
+    case 'monthly':   d.setMonth(d.getMonth() + 1); break;
+    case 'quarterly': d.setMonth(d.getMonth() + 3); break;
+    case 'yearly':    d.setFullYear(d.getFullYear() + 1); break;
+  }
+  return d;
+}
+
+export async function getRecurringExpenses(req: Request, res: Response, next: NextFunction) {
+  try {
+    const recurring = await prisma.recurringExpense.findMany({
+      where: { familyId: req.params.familyId as string },
+      orderBy: [{ isActive: 'desc' }, { nextDueDate: 'asc' }],
+    });
+    res.json({ recurring });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function createRecurringExpense(req: Request, res: Response, next: NextFunction) {
+  try {
+    const startDate = new Date(req.body.startDate);
+    const recurring = await prisma.recurringExpense.create({
+      data: {
+        name: req.body.name,
+        amount: req.body.amount,
+        currency: req.body.currency ?? 'EUR',
+        category: req.body.category,
+        description: req.body.description ?? null,
+        frequency: req.body.frequency ?? 'monthly',
+        startDate,
+        nextDueDate: startDate,
+        familyId: req.params.familyId as string,
+        createdById: req.user!.id,
+      },
+    });
+    res.status(201).json({ recurring });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function updateRecurringExpense(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { startDate, ...rest } = req.body;
+    const recurring = await prisma.recurringExpense.update({
+      where: { id: req.params.recurringId as string },
+      data: {
+        ...rest,
+        ...(startDate !== undefined && { startDate: new Date(startDate) }),
+      },
+    });
+    res.json({ recurring });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function deleteRecurringExpense(req: Request, res: Response, next: NextFunction) {
+  try {
+    await prisma.recurringExpense.delete({ where: { id: req.params.recurringId as string } });
+    res.json({ message: 'Recurring expense deleted' });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * POST /recurring/:recurringId/pay
+ *
+ * Marks the current period as paid:
+ *  1. Creates an Expense record for today (linked back to the template).
+ *  2. Advances nextDueDate by one period.
+ *  3. Sets lastPaidAt = now.
+ */
+export async function payRecurringExpense(req: Request, res: Response, next: NextFunction) {
+  try {
+    const familyId  = req.params.familyId  as string;
+    const recurringId = req.params.recurringId as string;
+
+    const recurring = await prisma.recurringExpense.findUnique({ where: { id: recurringId } });
+    if (!recurring) throw new NotFoundError('RecurringExpense');
+    if (!recurring.isActive) throw new ValidationError('Cette dépense récurrente est désactivée');
+
+    const now = new Date();
+
+    // Create the actual expense record
+    const expense = await prisma.expense.create({
+      data: {
+        familyId,
+        amount: recurring.amount,
+        currency: recurring.currency,
+        category: recurring.category,
+        description: recurring.description ?? recurring.name,
+        date: now,
+        isRecurring: true,
+        recurringExpenseId: recurringId,
+        paidById: req.user!.id,
+      },
+      include: {
+        paidBy: { select: { id: true, firstName: true, lastName: true } },
+      },
+    });
+
+    // Advance the schedule
+    const nextDueDate = advanceNextDueDate(recurring.nextDueDate, recurring.frequency);
+
+    const updated = await prisma.recurringExpense.update({
+      where: { id: recurringId },
+      data: { nextDueDate, lastPaidAt: now },
+    });
+
+    res.json({ recurring: updated, expense });
+  } catch (error) {
+    next(error);
+  }
+}

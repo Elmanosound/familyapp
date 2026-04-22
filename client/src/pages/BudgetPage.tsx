@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Wallet, Plus, TrendingUp, Target, ChevronLeft, ChevronRight,
   Pencil, Trash2, PiggyBank, Package, Search, CheckCircle2,
-  AlertTriangle, TrendingDown, Calendar,
+  AlertTriangle, TrendingDown, Calendar, Repeat,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -13,8 +13,8 @@ import { Input } from '../components/ui/Input';
 import { EmptyState } from '../components/ui/EmptyState';
 import { useFamilyStore } from '../stores/familyStore';
 import api from '../config/api';
-import type { Expense, BudgetGoal, BudgetEnvelope, BudgetSummary } from '@familyapp/shared';
-import { EXPENSE_CATEGORIES } from '@familyapp/shared';
+import type { Expense, BudgetGoal, BudgetEnvelope, BudgetSummary, RecurringExpense } from '@familyapp/shared';
+import { EXPENSE_CATEGORIES, RECURRING_FREQUENCY_LABELS, RECURRING_MONTHLY_FACTOR } from '@familyapp/shared';
 import { format, addMonths, subMonths, startOfMonth, endOfMonth } from 'date-fns';
 import toast from 'react-hot-toast';
 import { clsx } from 'clsx';
@@ -69,6 +69,17 @@ function envelopeBg(spent: number, budget: number) {
   return 'bg-green-500';
 }
 
+function daysUntilDue(nextDueDate: string): number {
+  return Math.round((new Date(nextDueDate).getTime() - Date.now()) / 86_400_000);
+}
+
+function recurringStatus(nextDueDate: string): 'overdue' | 'soon' | 'upcoming' {
+  const d = daysUntilDue(nextDueDate);
+  if (d < 0) return 'overdue';
+  if (d <= 7) return 'soon';
+  return 'upcoming';
+}
+
 function projectGoalDate(goal: BudgetGoal): string | null {
   if (goal.isCompleted || goal.currentAmount <= 0 || goal.contributions.length === 0) return null;
   const sorted = [...goal.contributions].sort(
@@ -106,6 +117,13 @@ const emptyEnvelopeForm = (): {
   period: 'monthly', category: '', color: '#3b82f6', icon: '',
 });
 const emptyContributeForm = () => ({ amount: '', note: '' });
+const emptyRecurringForm = (): {
+  name: string; amount: string; category: string; description: string;
+  frequency: 'weekly' | 'monthly' | 'quarterly' | 'yearly'; startDate: string;
+} => ({
+  name: '', amount: '', category: 'subscriptions', description: '',
+  frequency: 'monthly', startDate: toLocalDate(new Date()),
+});
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
@@ -113,7 +131,7 @@ export function BudgetPage() {
   const { activeFamily } = useFamilyStore();
   const familyId = activeFamily?._id;
 
-  const [tab, setTab] = useState<'overview' | 'expenses' | 'envelopes' | 'goals'>('overview');
+  const [tab, setTab] = useState<'overview' | 'expenses' | 'envelopes' | 'goals' | 'recurring'>('overview');
 
   // Data
   const [summary, setSummary] = useState<BudgetSummary | null>(null);
@@ -142,8 +160,14 @@ export function BudgetPage() {
   const [envelopeModal, setEnvelopeModal] = useState<{ mode: 'create' | 'edit'; data?: BudgetEnvelope } | null>(null);
   const [envelopeForm, setEnvelopeForm] = useState(emptyEnvelopeForm());
 
+  // Recurring expenses
+  const [recurring, setRecurring] = useState<RecurringExpense[]>([]);
+  const [recurringModal, setRecurringModal] = useState<{ mode: 'create' | 'edit'; data?: RecurringExpense } | null>(null);
+  const [recurringForm, setRecurringForm] = useState(emptyRecurringForm());
+  const [payingId, setPayingId] = useState<string | null>(null);
+
   // Delete confirm
-  const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'expense' | 'goal' | 'envelope'; id: string } | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'expense' | 'goal' | 'envelope' | 'recurring'; id: string } | null>(null);
 
   // ── Fetchers ───────────────────────────────────────────────────────────────
 
@@ -184,11 +208,20 @@ export function BudgetPage() {
     } catch { /* silent */ }
   }, [familyId]);
 
+  const fetchRecurring = useCallback(async () => {
+    if (!familyId) return;
+    try {
+      const { data } = await api.get(`/families/${familyId}/budget/recurring`);
+      setRecurring(data.recurring);
+    } catch { /* silent */ }
+  }, [familyId]);
+
   useEffect(() => {
     fetchSummary();
     fetchGoals();
     fetchEnvelopes();
-  }, [fetchSummary, fetchGoals, fetchEnvelopes]);
+    fetchRecurring();
+  }, [fetchSummary, fetchGoals, fetchEnvelopes, fetchRecurring]);
 
   useEffect(() => {
     fetchExpenses();
@@ -396,6 +429,76 @@ export function BudgetPage() {
     }
   };
 
+  // ── Recurring CRUD ───────────────────────────────────────────────────────
+
+  const openCreateRecurring = () => {
+    setRecurringForm(emptyRecurringForm());
+    setRecurringModal({ mode: 'create' });
+  };
+  const openEditRecurring = (r: RecurringExpense) => {
+    setRecurringForm({
+      name: r.name,
+      amount: String(r.amount),
+      category: r.category,
+      description: r.description ?? '',
+      frequency: r.frequency,
+      startDate: toLocalDate(new Date(r.startDate)),
+    });
+    setRecurringModal({ mode: 'edit', data: r });
+  };
+  const saveRecurring = async () => {
+    if (!familyId || !recurringForm.name || !recurringForm.amount) return;
+    const payload = {
+      name: recurringForm.name,
+      amount: parseFloat(recurringForm.amount),
+      category: recurringForm.category,
+      description: recurringForm.description || null,
+      frequency: recurringForm.frequency,
+      startDate: new Date(recurringForm.startDate).toISOString(),
+    };
+    try {
+      if (recurringModal?.mode === 'edit' && recurringModal.data) {
+        await api.patch(`/families/${familyId}/budget/recurring/${recurringModal.data._id}`, payload);
+        toast.success('Dépense récurrente modifiée');
+      } else {
+        await api.post(`/families/${familyId}/budget/recurring`, payload);
+        toast.success('Dépense récurrente créée');
+      }
+      setRecurringModal(null);
+      fetchRecurring();
+    } catch {
+      toast.error('Erreur lors de la sauvegarde');
+    }
+  };
+
+  const payRecurring = async (r: RecurringExpense) => {
+    if (!familyId) return;
+    setPayingId(r._id);
+    try {
+      await api.post(`/families/${familyId}/budget/recurring/${r._id}/pay`);
+      toast.success(`"${r.name}" marqué comme payé`);
+      fetchRecurring();
+      fetchExpenses();
+      fetchSummary();
+    } catch {
+      toast.error('Erreur lors du paiement');
+    } finally {
+      setPayingId(null);
+    }
+  };
+
+  const confirmDeleteRecurring = async (id: string) => {
+    if (!familyId) return;
+    try {
+      await api.delete(`/families/${familyId}/budget/recurring/${id}`);
+      toast.success('Dépense récurrente supprimée');
+      setDeleteConfirm(null);
+      fetchRecurring();
+    } catch {
+      toast.error('Erreur lors de la suppression');
+    }
+  };
+
   // ── Delete dispatch ──────────────────────────────────────────────────────
 
   const handleDeleteConfirm = () => {
@@ -403,6 +506,7 @@ export function BudgetPage() {
     if (deleteConfirm.type === 'expense') confirmDeleteExpense(deleteConfirm.id);
     else if (deleteConfirm.type === 'goal') confirmDeleteGoal(deleteConfirm.id);
     else if (deleteConfirm.type === 'envelope') confirmDeleteEnvelope(deleteConfirm.id);
+    else if (deleteConfirm.type === 'recurring') confirmDeleteRecurring(deleteConfirm.id);
   };
 
   // ── Guards ────────────────────────────────────────────────────────────────
@@ -420,10 +524,11 @@ export function BudgetPage() {
   // ── Render ────────────────────────────────────────────────────────────────
 
   const tabs = [
-    { key: 'overview', label: 'Vue d\'ensemble', icon: TrendingUp },
-    { key: 'expenses', label: 'Dépenses', icon: Wallet },
-    { key: 'envelopes', label: 'Enveloppes', icon: Package },
-    { key: 'goals', label: 'Objectifs', icon: Target },
+    { key: 'overview',  label: 'Vue d\'ensemble', icon: TrendingUp },
+    { key: 'expenses',  label: 'Dépenses',         icon: Wallet     },
+    { key: 'envelopes', label: 'Enveloppes',        icon: Package    },
+    { key: 'goals',     label: 'Objectifs',         icon: Target     },
+    { key: 'recurring', label: 'Récurrents',        icon: Repeat     },
   ] as const;
 
   return (
@@ -444,6 +549,11 @@ export function BudgetPage() {
         {tab === 'goals' && (
           <Button size="sm" onClick={openCreateGoal}>
             <Plus className="w-4 h-4 mr-1" /> Objectif
+          </Button>
+        )}
+        {tab === 'recurring' && (
+          <Button size="sm" onClick={openCreateRecurring}>
+            <Plus className="w-4 h-4 mr-1" /> Récurrent
           </Button>
         )}
       </div>
@@ -844,6 +954,178 @@ export function BudgetPage() {
       )}
 
       {/* ═══════════════════════════════════════════════════════════════
+          TAB: Récurrents
+      ═══════════════════════════════════════════════════════════════ */}
+      {tab === 'recurring' && (() => {
+        const activeRecurring = recurring.filter((r) => r.isActive);
+        const inactive = recurring.filter((r) => !r.isActive);
+
+        // Monthly equivalent total
+        const monthlyTotal = activeRecurring.reduce(
+          (sum, r) => sum + r.amount * (RECURRING_MONTHLY_FACTOR[r.frequency] ?? 1),
+          0,
+        );
+
+        const overdue  = activeRecurring.filter((r) => recurringStatus(r.nextDueDate) === 'overdue');
+        const soon     = activeRecurring.filter((r) => recurringStatus(r.nextDueDate) === 'soon');
+        const upcoming = activeRecurring.filter((r) => recurringStatus(r.nextDueDate) === 'upcoming');
+
+        const RecurringCard = ({ r }: { r: RecurringExpense }) => {
+          const days = daysUntilDue(r.nextDueDate);
+          const status = recurringStatus(r.nextDueDate);
+          return (
+            <div className={clsx(
+              'card p-4 relative group',
+              !r.isActive && 'opacity-50',
+            )}>
+              <div className="flex items-start gap-3">
+                <div
+                  className="w-2.5 h-2.5 rounded-full flex-shrink-0 mt-1.5"
+                  style={{ backgroundColor: CATEGORY_COLORS[r.category] ?? '#6b7280' }}
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-semibold text-sm truncate">{r.name}</p>
+                    <span className="font-bold text-sm whitespace-nowrap">{r.amount.toFixed(2)} €</span>
+                  </div>
+                  <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                    <span className="text-xs text-gray-400">
+                      {CATEGORY_LABELS[r.category] ?? r.category}
+                    </span>
+                    <span className="text-xs bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded">
+                      {RECURRING_FREQUENCY_LABELS[r.frequency]}
+                    </span>
+                    {r.isActive && (
+                      <span className={clsx(
+                        'text-xs font-medium px-1.5 py-0.5 rounded-full',
+                        status === 'overdue' && 'bg-red-100 text-red-600 dark:bg-red-900/30',
+                        status === 'soon'    && 'bg-orange-100 text-orange-600 dark:bg-orange-900/30',
+                        status === 'upcoming'&& 'bg-green-100 text-green-600 dark:bg-green-900/30',
+                      )}>
+                        {status === 'overdue'
+                          ? `En retard de ${Math.abs(days)}j`
+                          : days === 0
+                          ? "Aujourd'hui"
+                          : `J-${days}`}
+                      </span>
+                    )}
+                  </div>
+                  {r.description && (
+                    <p className="text-xs text-gray-400 mt-0.5 truncate">{r.description}</p>
+                  )}
+                  {r.lastPaidAt && (
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      Dernier paiement : {format(new Date(r.lastPaidAt), 'dd/MM/yyyy')}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center gap-2 mt-3">
+                {r.isActive && (
+                  <Button
+                    size="sm"
+                    onClick={() => payRecurring(r)}
+                    isLoading={payingId === r._id}
+                    className="flex-1"
+                  >
+                    Payer maintenant
+                  </Button>
+                )}
+                <div className="flex gap-1 ml-auto">
+                  <button onClick={() => openEditRecurring(r)} className="p-1.5 text-gray-400 hover:text-budget rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
+                    <Pencil className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => setDeleteConfirm({ type: 'recurring', id: r._id })}
+                    className="p-1.5 text-gray-400 hover:text-red-500 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        };
+
+        return (
+          <div className="space-y-6">
+            {/* Summary bar */}
+            {activeRecurring.length > 0 && (
+              <div className="card p-4 flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-gray-400">Équivalent mensuel total</p>
+                  <p className="text-2xl font-bold">{monthlyTotal.toFixed(2)} €</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs text-gray-400">{activeRecurring.length} actif{activeRecurring.length > 1 ? 's' : ''}</p>
+                  {overdue.length > 0 && (
+                    <p className="text-xs text-red-500 font-medium">{overdue.length} en retard</p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {activeRecurring.length === 0 && inactive.length === 0 ? (
+              <EmptyState
+                icon={<Repeat className="w-12 h-12" />}
+                title="Aucune dépense récurrente"
+                description="Ajoutez loyer, abonnements, assurances... et payez-les en un clic chaque période."
+                action={<Button size="sm" onClick={openCreateRecurring}>Ajouter</Button>}
+              />
+            ) : (
+              <>
+                {overdue.length > 0 && (
+                  <div>
+                    <h3 className="text-sm font-semibold text-red-500 mb-3 flex items-center gap-1.5">
+                      <AlertTriangle className="w-4 h-4" /> En retard ({overdue.length})
+                    </h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {overdue.map((r) => <RecurringCard key={r._id} r={r} />)}
+                    </div>
+                  </div>
+                )}
+
+                {soon.length > 0 && (
+                  <div>
+                    <h3 className="text-sm font-semibold text-orange-500 mb-3">
+                      Cette semaine ({soon.length})
+                    </h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {soon.map((r) => <RecurringCard key={r._id} r={r} />)}
+                    </div>
+                  </div>
+                )}
+
+                {upcoming.length > 0 && (
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-500 mb-3">
+                      À venir ({upcoming.length})
+                    </h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {upcoming.map((r) => <RecurringCard key={r._id} r={r} />)}
+                    </div>
+                  </div>
+                )}
+
+                {inactive.length > 0 && (
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-400 mb-3">
+                      Désactivés ({inactive.length})
+                    </h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {inactive.map((r) => <RecurringCard key={r._id} r={r} />)}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* ═══════════════════════════════════════════════════════════════
           MODALS
       ═══════════════════════════════════════════════════════════════ */}
 
@@ -1116,6 +1398,87 @@ export function BudgetPage() {
         </div>
       </Modal>
 
+      {/* Recurring expense modal */}
+      <Modal
+        isOpen={!!recurringModal}
+        onClose={() => setRecurringModal(null)}
+        title={recurringModal?.mode === 'edit' ? 'Modifier la dépense récurrente' : 'Nouvelle dépense récurrente'}
+      >
+        <div className="space-y-4">
+          <Input
+            label="Nom"
+            value={recurringForm.name}
+            onChange={(e) => setRecurringForm((f) => ({ ...f, name: e.target.value }))}
+            placeholder="Loyer, Netflix, Assurance..."
+            required
+          />
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <Input
+                label="Montant (€)"
+                type="number"
+                step="0.01"
+                min="0"
+                value={recurringForm.amount}
+                onChange={(e) => setRecurringForm((f) => ({ ...f, amount: e.target.value }))}
+                required
+              />
+            </div>
+            <div className="flex-1">
+              <label className="block text-sm font-medium mb-1">Catégorie</label>
+              <select
+                value={recurringForm.category}
+                onChange={(e) => setRecurringForm((f) => ({ ...f, category: e.target.value }))}
+                className="input-field"
+              >
+                {EXPENSE_CATEGORIES.map((c) => (
+                  <option key={c} value={c}>{CATEGORY_LABELS[c] ?? c}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Fréquence</label>
+            <div className="grid grid-cols-2 gap-2">
+              {(['weekly', 'monthly', 'quarterly', 'yearly'] as const).map((f) => (
+                <button
+                  key={f}
+                  type="button"
+                  onClick={() => setRecurringForm((form) => ({ ...form, frequency: f }))}
+                  className={clsx(
+                    'py-2 rounded-lg border text-sm transition-colors',
+                    recurringForm.frequency === f
+                      ? 'border-budget bg-budget/10 text-budget font-medium'
+                      : 'border-gray-200 dark:border-gray-700',
+                  )}
+                >
+                  {RECURRING_FREQUENCY_LABELS[f]}
+                </button>
+              ))}
+            </div>
+          </div>
+          <Input
+            label="Date de début"
+            type="date"
+            value={recurringForm.startDate}
+            onChange={(e) => setRecurringForm((f) => ({ ...f, startDate: e.target.value }))}
+          />
+          <Input
+            label="Note (optionnel)"
+            value={recurringForm.description}
+            onChange={(e) => setRecurringForm((f) => ({ ...f, description: e.target.value }))}
+            placeholder="Détails..."
+          />
+          <Button
+            onClick={saveRecurring}
+            className="w-full"
+            disabled={!recurringForm.name || !recurringForm.amount}
+          >
+            {recurringModal?.mode === 'edit' ? 'Enregistrer' : 'Créer'}
+          </Button>
+        </div>
+      </Modal>
+
       {/* Delete confirm modal */}
       <Modal
         isOpen={!!deleteConfirm}
@@ -1124,9 +1487,10 @@ export function BudgetPage() {
       >
         <div className="space-y-4">
           <p className="text-sm text-gray-600 dark:text-gray-400">
-            {deleteConfirm?.type === 'expense' && 'Supprimer cette dépense ? Cette action est irréversible.'}
-            {deleteConfirm?.type === 'goal' && 'Supprimer cet objectif et toutes ses contributions ? Cette action est irréversible.'}
-            {deleteConfirm?.type === 'envelope' && 'Supprimer cette enveloppe ? Cette action est irréversible.'}
+            {deleteConfirm?.type === 'expense'   && 'Supprimer cette dépense ? Cette action est irréversible.'}
+            {deleteConfirm?.type === 'goal'      && 'Supprimer cet objectif et toutes ses contributions ? Cette action est irréversible.'}
+            {deleteConfirm?.type === 'envelope'  && 'Supprimer cette enveloppe ? Cette action est irréversible.'}
+            {deleteConfirm?.type === 'recurring' && 'Supprimer cette dépense récurrente ? Les dépenses déjà générées seront conservées.'}
           </p>
           <div className="flex gap-2 justify-end">
             <Button variant="secondary" onClick={() => setDeleteConfirm(null)}>Annuler</Button>
