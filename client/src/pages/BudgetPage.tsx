@@ -2,10 +2,10 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Wallet, Plus, TrendingUp, Target, ChevronLeft, ChevronRight,
   Pencil, Trash2, PiggyBank, Package, Search, CheckCircle2,
-  AlertTriangle, TrendingDown, Calendar, Repeat,
+  AlertTriangle, TrendingDown, Calendar, Repeat, Banknote,
 } from 'lucide-react';
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from 'recharts';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
@@ -13,8 +13,14 @@ import { Input } from '../components/ui/Input';
 import { EmptyState } from '../components/ui/EmptyState';
 import { useFamilyStore } from '../stores/familyStore';
 import api from '../config/api';
-import type { Expense, BudgetGoal, BudgetEnvelope, BudgetSummary, RecurringExpense } from '@familyapp/shared';
-import { EXPENSE_CATEGORIES, RECURRING_FREQUENCY_LABELS, RECURRING_MONTHLY_FACTOR } from '@familyapp/shared';
+import type {
+  Expense, BudgetGoal, BudgetEnvelope, BudgetSummary,
+  RecurringExpense, Income,
+} from '@familyapp/shared';
+import {
+  EXPENSE_CATEGORIES, INCOME_CATEGORIES, INCOME_CATEGORY_LABELS,
+  RECURRING_FREQUENCY_LABELS, RECURRING_MONTHLY_FACTOR,
+} from '@familyapp/shared';
 import { format, addMonths, subMonths, startOfMonth, endOfMonth } from 'date-fns';
 import toast from 'react-hot-toast';
 import { clsx } from 'clsx';
@@ -33,12 +39,15 @@ const CATEGORY_COLORS: Record<string, string> = {
   clothing: '#14b8a6', housing: '#6366f1', dining: '#f97316',
   subscriptions: '#06b6d4', other: '#6b7280',
 };
+const INCOME_COLORS: Record<string, string> = {
+  salary: '#22c55e', freelance: '#3b82f6', rental: '#f59e0b',
+  investment: '#8b5cf6', gift: '#ec4899', other: '#6b7280',
+};
 const GOAL_EMOJIS = [
   '🏠', '🚗', '✈️', '🏖️', '🎓', '💒', '👶', '💻',
   '🏋️', '🎸', '🎮', '📱', '🐕', '🌴', '💎', '🏔️',
   '🚀', '🎯', '🛥️', '🎨', '🍕', '🏥', '⚡', '🌱',
 ];
-
 const ENVELOPE_COLORS = [
   '#ef4444', '#f97316', '#f59e0b', '#22c55e',
   '#14b8a6', '#3b82f6', '#8b5cf6', '#ec4899', '#6b7280',
@@ -124,6 +133,10 @@ const emptyRecurringForm = (): {
   name: '', amount: '', category: 'subscriptions', description: '',
   frequency: 'monthly', startDate: toLocalDate(new Date()),
 });
+const emptyIncomeForm = () => ({
+  amount: '', category: 'salary', description: '',
+  date: toLocalDate(new Date()), isRecurring: false,
+});
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
@@ -131,22 +144,29 @@ export function BudgetPage() {
   const { activeFamily } = useFamilyStore();
   const familyId = activeFamily?._id;
 
-  const [tab, setTab] = useState<'overview' | 'expenses' | 'envelopes' | 'goals' | 'recurring'>('overview');
+  const [tab, setTab] = useState<'overview' | 'expenses' | 'incomes' | 'envelopes' | 'goals' | 'recurring'>('overview');
 
   // Data
   const [summary, setSummary] = useState<BudgetSummary | null>(null);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [totalExpenses, setTotalExpenses] = useState(0);
+  const [incomes, setIncomes] = useState<Income[]>([]);
+  const [totalIncomes, setTotalIncomes] = useState(0);
   const [goals, setGoals] = useState<BudgetGoal[]>([]);
   const [envelopes, setEnvelopes] = useState<BudgetEnvelope[]>([]);
+  const [recurring, setRecurring] = useState<RecurringExpense[]>([]);
 
-  // Period filter for expenses tab
+  // Shared period filter (expenses + incomes tabs)
   const [period, setPeriod] = useState<Date>(startOfMonth(new Date()));
   const [search, setSearch] = useState('');
 
   // Expense modal
   const [expenseModal, setExpenseModal] = useState<{ mode: 'create' | 'edit'; data?: Expense } | null>(null);
   const [expenseForm, setExpenseForm] = useState(emptyExpenseForm());
+
+  // Income modal
+  const [incomeModal, setIncomeModal] = useState<{ mode: 'create' | 'edit'; data?: Income } | null>(null);
+  const [incomeForm, setIncomeForm] = useState(emptyIncomeForm());
 
   // Goal modal
   const [goalModal, setGoalModal] = useState<{ mode: 'create' | 'edit'; data?: BudgetGoal } | null>(null);
@@ -160,14 +180,15 @@ export function BudgetPage() {
   const [envelopeModal, setEnvelopeModal] = useState<{ mode: 'create' | 'edit'; data?: BudgetEnvelope } | null>(null);
   const [envelopeForm, setEnvelopeForm] = useState(emptyEnvelopeForm());
 
-  // Recurring expenses
-  const [recurring, setRecurring] = useState<RecurringExpense[]>([]);
+  // Recurring modal
   const [recurringModal, setRecurringModal] = useState<{ mode: 'create' | 'edit'; data?: RecurringExpense } | null>(null);
   const [recurringForm, setRecurringForm] = useState(emptyRecurringForm());
   const [payingId, setPayingId] = useState<string | null>(null);
 
   // Delete confirm
-  const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'expense' | 'goal' | 'envelope' | 'recurring'; id: string } | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{
+    type: 'expense' | 'income' | 'goal' | 'envelope' | 'recurring'; id: string;
+  } | null>(null);
 
   // ── Fetchers ───────────────────────────────────────────────────────────────
 
@@ -183,7 +204,7 @@ export function BudgetPage() {
     if (!familyId) return;
     try {
       const start = format(startOfMonth(period), 'yyyy-MM-dd');
-      const end = format(endOfMonth(period), 'yyyy-MM-dd');
+      const end   = format(endOfMonth(period),   'yyyy-MM-dd');
       const params: Record<string, string> = { startDate: start, endDate: end, limit: '200' };
       if (search.trim()) params.search = search.trim();
       const { data } = await api.get(`/families/${familyId}/budget/expenses`, { params });
@@ -191,6 +212,19 @@ export function BudgetPage() {
       setTotalExpenses(data.total);
     } catch { /* silent */ }
   }, [familyId, period, search]);
+
+  const fetchIncomes = useCallback(async () => {
+    if (!familyId) return;
+    try {
+      const start = format(startOfMonth(period), 'yyyy-MM-dd');
+      const end   = format(endOfMonth(period),   'yyyy-MM-dd');
+      const { data } = await api.get(`/families/${familyId}/budget/incomes`, {
+        params: { startDate: start, endDate: end, limit: '200' },
+      });
+      setIncomes(data.incomes);
+      setTotalIncomes(data.total);
+    } catch { /* silent */ }
+  }, [familyId, period]);
 
   const fetchGoals = useCallback(async () => {
     if (!familyId) return;
@@ -225,7 +259,8 @@ export function BudgetPage() {
 
   useEffect(() => {
     fetchExpenses();
-  }, [fetchExpenses]);
+    fetchIncomes();
+  }, [fetchExpenses, fetchIncomes]);
 
   // ── Chart data ─────────────────────────────────────────────────────────────
 
@@ -234,20 +269,22 @@ export function BudgetPage() {
     return Array.from({ length: 12 }, (_, i) => {
       const d = new Date(now.getFullYear(), now.getMonth() - 11 + i, 1);
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const item = summary?.monthlyTrend.find((m) => m.month === key);
       return {
-        label: MONTH_NAMES[d.getMonth()],
-        total: summary?.monthlyTrend.find((m) => m.month === key)?.total ?? 0,
+        label:    MONTH_NAMES[d.getMonth()],
+        expenses: item?.expenses ?? 0,
+        income:   item?.income   ?? 0,
       };
     });
   }, [summary]);
 
-  const lastMonthTotal = useMemo(() => {
+  const lastMonthExpenses = useMemo(() => {
     const now = new Date();
     const last = `${now.getFullYear()}-${String(now.getMonth()).padStart(2, '0')}`;
     const adjusted = last === `${now.getFullYear()}-00`
       ? `${now.getFullYear() - 1}-12`
       : last;
-    return summary?.monthlyTrend.find((m) => m.month === adjusted)?.total ?? null;
+    return summary?.monthlyTrend.find((m) => m.month === adjusted)?.expenses ?? null;
   }, [summary]);
 
   // ── Expense CRUD ──────────────────────────────────────────────────────────
@@ -258,21 +295,15 @@ export function BudgetPage() {
   };
   const openEditExpense = (exp: Expense) => {
     setExpenseForm({
-      amount: String(exp.amount),
-      category: exp.category,
-      description: exp.description,
-      date: toLocalDate(new Date(exp.date)),
+      amount: String(exp.amount), category: exp.category,
+      description: exp.description, date: toLocalDate(new Date(exp.date)),
       isRecurring: exp.isRecurring,
     });
     setExpenseModal({ mode: 'edit', data: exp });
   };
   const saveExpense = async () => {
     if (!familyId || !expenseForm.amount || !expenseForm.description) return;
-    const payload = {
-      ...expenseForm,
-      amount: parseFloat(expenseForm.amount),
-      date: new Date(expenseForm.date).toISOString(),
-    };
+    const payload = { ...expenseForm, amount: parseFloat(expenseForm.amount), date: new Date(expenseForm.date).toISOString() };
     try {
       if (expenseModal?.mode === 'edit' && expenseModal.data) {
         await api.patch(`/families/${familyId}/budget/expenses/${expenseModal.data._id}`, payload);
@@ -284,11 +315,8 @@ export function BudgetPage() {
       setExpenseModal(null);
       fetchExpenses();
       fetchSummary();
-    } catch {
-      toast.error('Erreur lors de la sauvegarde');
-    }
+    } catch { toast.error('Erreur lors de la sauvegarde'); }
   };
-
   const confirmDeleteExpense = async (id: string) => {
     if (!familyId) return;
     try {
@@ -297,35 +325,66 @@ export function BudgetPage() {
       setDeleteConfirm(null);
       fetchExpenses();
       fetchSummary();
-    } catch {
-      toast.error('Erreur lors de la suppression');
-    }
+    } catch { toast.error('Erreur lors de la suppression'); }
+  };
+
+  // ── Income CRUD ───────────────────────────────────────────────────────────
+
+  const openCreateIncome = () => {
+    setIncomeForm(emptyIncomeForm());
+    setIncomeModal({ mode: 'create' });
+  };
+  const openEditIncome = (inc: Income) => {
+    setIncomeForm({
+      amount: String(inc.amount), category: inc.category,
+      description: inc.description ?? '', date: toLocalDate(new Date(inc.date)),
+      isRecurring: inc.isRecurring,
+    });
+    setIncomeModal({ mode: 'edit', data: inc });
+  };
+  const saveIncome = async () => {
+    if (!familyId || !incomeForm.amount || !incomeForm.description) return;
+    const payload = { ...incomeForm, amount: parseFloat(incomeForm.amount), date: new Date(incomeForm.date).toISOString() };
+    try {
+      if (incomeModal?.mode === 'edit' && incomeModal.data) {
+        await api.patch(`/families/${familyId}/budget/incomes/${incomeModal.data._id}`, payload);
+        toast.success('Revenu modifié');
+      } else {
+        await api.post(`/families/${familyId}/budget/incomes`, payload);
+        toast.success('Revenu ajouté');
+      }
+      setIncomeModal(null);
+      fetchIncomes();
+      fetchSummary();
+    } catch { toast.error('Erreur lors de la sauvegarde'); }
+  };
+  const confirmDeleteIncome = async (id: string) => {
+    if (!familyId) return;
+    try {
+      await api.delete(`/families/${familyId}/budget/incomes/${id}`);
+      toast.success('Revenu supprimé');
+      setDeleteConfirm(null);
+      fetchIncomes();
+      fetchSummary();
+    } catch { toast.error('Erreur lors de la suppression'); }
   };
 
   // ── Goal CRUD ────────────────────────────────────────────────────────────
 
-  const openCreateGoal = () => {
-    setGoalForm(emptyGoalForm());
-    setGoalModal({ mode: 'create' });
-  };
+  const openCreateGoal = () => { setGoalForm(emptyGoalForm()); setGoalModal({ mode: 'create' }); };
   const openEditGoal = (goal: BudgetGoal) => {
     setGoalForm({
-      name: goal.name,
-      targetAmount: String(goal.targetAmount),
-      currency: goal.currency,
-      deadline: goal.deadline ? toLocalDate(new Date(goal.deadline)) : '',
-      icon: goal.icon ?? '',
+      name: goal.name, targetAmount: String(goal.targetAmount), currency: goal.currency,
+      deadline: goal.deadline ? toLocalDate(new Date(goal.deadline)) : '', icon: goal.icon ?? '',
     });
     setGoalModal({ mode: 'edit', data: goal });
   };
   const saveGoal = async () => {
     if (!familyId || !goalForm.name || !goalForm.targetAmount) return;
     const payload = {
-      name: goalForm.name,
-      targetAmount: parseFloat(goalForm.targetAmount),
-      currency: goalForm.currency,
-      deadline: goalForm.deadline || null,
-      icon: goalForm.icon || null,   // null = supprime l'icône ; undefined serait ignoré par Prisma
+      name: goalForm.name, targetAmount: parseFloat(goalForm.targetAmount),
+      currency: goalForm.currency, deadline: goalForm.deadline || null,
+      icon: goalForm.icon || null,
     };
     try {
       if (goalModal?.mode === 'edit' && goalModal.data) {
@@ -337,30 +396,20 @@ export function BudgetPage() {
       }
       setGoalModal(null);
       fetchGoals();
-    } catch {
-      toast.error('Erreur lors de la sauvegarde');
-    }
+    } catch { toast.error('Erreur lors de la sauvegarde'); }
   };
-
-  const openContribute = (goal: BudgetGoal) => {
-    setContributeForm(emptyContributeForm());
-    setContributeGoal(goal);
-  };
+  const openContribute = (goal: BudgetGoal) => { setContributeForm(emptyContributeForm()); setContributeGoal(goal); };
   const saveContribution = async () => {
     if (!familyId || !contributeGoal || !contributeForm.amount) return;
     try {
       await api.post(`/families/${familyId}/budget/goals/${contributeGoal._id}/contribute`, {
-        amount: parseFloat(contributeForm.amount),
-        note: contributeForm.note || undefined,
+        amount: parseFloat(contributeForm.amount), note: contributeForm.note || undefined,
       });
       toast.success('Contribution ajoutée !');
       setContributeGoal(null);
       fetchGoals();
-    } catch {
-      toast.error("Erreur lors de l'ajout");
-    }
+    } catch { toast.error("Erreur lors de l'ajout"); }
   };
-
   const confirmDeleteGoal = async (id: string) => {
     if (!familyId) return;
     try {
@@ -368,38 +417,25 @@ export function BudgetPage() {
       toast.success('Objectif supprimé');
       setDeleteConfirm(null);
       fetchGoals();
-    } catch {
-      toast.error('Erreur lors de la suppression');
-    }
+    } catch { toast.error('Erreur lors de la suppression'); }
   };
 
   // ── Envelope CRUD ────────────────────────────────────────────────────────
 
-  const openCreateEnvelope = () => {
-    setEnvelopeForm(emptyEnvelopeForm());
-    setEnvelopeModal({ mode: 'create' });
-  };
+  const openCreateEnvelope = () => { setEnvelopeForm(emptyEnvelopeForm()); setEnvelopeModal({ mode: 'create' }); };
   const openEditEnvelope = (env: BudgetEnvelope) => {
     setEnvelopeForm({
-      name: env.name,
-      budgetedAmount: String(env.budgetedAmount),
-      currency: env.currency,
-      period: env.period,
-      category: env.category ?? '',
-      color: env.color,
-      icon: env.icon ?? '',
+      name: env.name, budgetedAmount: String(env.budgetedAmount), currency: env.currency,
+      period: env.period, category: env.category ?? '', color: env.color, icon: env.icon ?? '',
     });
     setEnvelopeModal({ mode: 'edit', data: env });
   };
   const saveEnvelope = async () => {
     if (!familyId || !envelopeForm.name || !envelopeForm.budgetedAmount) return;
     const payload = {
-      name: envelopeForm.name,
-      budgetedAmount: parseFloat(envelopeForm.budgetedAmount),
-      currency: envelopeForm.currency,
-      period: envelopeForm.period,
-      category: envelopeForm.category || null,
-      color: envelopeForm.color,
+      name: envelopeForm.name, budgetedAmount: parseFloat(envelopeForm.budgetedAmount),
+      currency: envelopeForm.currency, period: envelopeForm.period,
+      category: envelopeForm.category || null, color: envelopeForm.color,
       icon: envelopeForm.icon || null,
     };
     try {
@@ -412,11 +448,8 @@ export function BudgetPage() {
       }
       setEnvelopeModal(null);
       fetchEnvelopes();
-    } catch {
-      toast.error('Erreur lors de la sauvegarde');
-    }
+    } catch { toast.error('Erreur lors de la sauvegarde'); }
   };
-
   const confirmDeleteEnvelope = async (id: string) => {
     if (!familyId) return;
     try {
@@ -424,24 +457,16 @@ export function BudgetPage() {
       toast.success('Enveloppe supprimée');
       setDeleteConfirm(null);
       fetchEnvelopes();
-    } catch {
-      toast.error('Erreur lors de la suppression');
-    }
+    } catch { toast.error('Erreur lors de la suppression'); }
   };
 
   // ── Recurring CRUD ───────────────────────────────────────────────────────
 
-  const openCreateRecurring = () => {
-    setRecurringForm(emptyRecurringForm());
-    setRecurringModal({ mode: 'create' });
-  };
+  const openCreateRecurring = () => { setRecurringForm(emptyRecurringForm()); setRecurringModal({ mode: 'create' }); };
   const openEditRecurring = (r: RecurringExpense) => {
     setRecurringForm({
-      name: r.name,
-      amount: String(r.amount),
-      category: r.category,
-      description: r.description ?? '',
-      frequency: r.frequency,
+      name: r.name, amount: String(r.amount), category: r.category,
+      description: r.description ?? '', frequency: r.frequency,
       startDate: toLocalDate(new Date(r.startDate)),
     });
     setRecurringModal({ mode: 'edit', data: r });
@@ -449,12 +474,9 @@ export function BudgetPage() {
   const saveRecurring = async () => {
     if (!familyId || !recurringForm.name || !recurringForm.amount) return;
     const payload = {
-      name: recurringForm.name,
-      amount: parseFloat(recurringForm.amount),
-      category: recurringForm.category,
-      description: recurringForm.description || null,
-      frequency: recurringForm.frequency,
-      startDate: new Date(recurringForm.startDate).toISOString(),
+      name: recurringForm.name, amount: parseFloat(recurringForm.amount),
+      category: recurringForm.category, description: recurringForm.description || null,
+      frequency: recurringForm.frequency, startDate: new Date(recurringForm.startDate).toISOString(),
     };
     try {
       if (recurringModal?.mode === 'edit' && recurringModal.data) {
@@ -466,11 +488,8 @@ export function BudgetPage() {
       }
       setRecurringModal(null);
       fetchRecurring();
-    } catch {
-      toast.error('Erreur lors de la sauvegarde');
-    }
+    } catch { toast.error('Erreur lors de la sauvegarde'); }
   };
-
   const payRecurring = async (r: RecurringExpense) => {
     if (!familyId) return;
     setPayingId(r._id);
@@ -480,13 +499,9 @@ export function BudgetPage() {
       fetchRecurring();
       fetchExpenses();
       fetchSummary();
-    } catch {
-      toast.error('Erreur lors du paiement');
-    } finally {
-      setPayingId(null);
-    }
+    } catch { toast.error('Erreur lors du paiement'); }
+    finally { setPayingId(null); }
   };
-
   const confirmDeleteRecurring = async (id: string) => {
     if (!familyId) return;
     try {
@@ -494,18 +509,17 @@ export function BudgetPage() {
       toast.success('Dépense récurrente supprimée');
       setDeleteConfirm(null);
       fetchRecurring();
-    } catch {
-      toast.error('Erreur lors de la suppression');
-    }
+    } catch { toast.error('Erreur lors de la suppression'); }
   };
 
   // ── Delete dispatch ──────────────────────────────────────────────────────
 
   const handleDeleteConfirm = () => {
     if (!deleteConfirm) return;
-    if (deleteConfirm.type === 'expense') confirmDeleteExpense(deleteConfirm.id);
-    else if (deleteConfirm.type === 'goal') confirmDeleteGoal(deleteConfirm.id);
-    else if (deleteConfirm.type === 'envelope') confirmDeleteEnvelope(deleteConfirm.id);
+    if      (deleteConfirm.type === 'expense')   confirmDeleteExpense(deleteConfirm.id);
+    else if (deleteConfirm.type === 'income')    confirmDeleteIncome(deleteConfirm.id);
+    else if (deleteConfirm.type === 'goal')      confirmDeleteGoal(deleteConfirm.id);
+    else if (deleteConfirm.type === 'envelope')  confirmDeleteEnvelope(deleteConfirm.id);
     else if (deleteConfirm.type === 'recurring') confirmDeleteRecurring(deleteConfirm.id);
   };
 
@@ -524,12 +538,44 @@ export function BudgetPage() {
   // ── Render ────────────────────────────────────────────────────────────────
 
   const tabs = [
-    { key: 'overview',  label: 'Vue d\'ensemble', icon: TrendingUp },
-    { key: 'expenses',  label: 'Dépenses',         icon: Wallet     },
-    { key: 'envelopes', label: 'Enveloppes',        icon: Package    },
-    { key: 'goals',     label: 'Objectifs',         icon: Target     },
-    { key: 'recurring', label: 'Récurrents',        icon: Repeat     },
+    { key: 'overview',  label: "Vue d'ensemble", icon: TrendingUp },
+    { key: 'expenses',  label: 'Dépenses',        icon: Wallet     },
+    { key: 'incomes',   label: 'Revenus',          icon: Banknote   },
+    { key: 'envelopes', label: 'Enveloppes',       icon: Package    },
+    { key: 'goals',     label: 'Objectifs',        icon: Target     },
+    { key: 'recurring', label: 'Récurrents',       icon: Repeat     },
   ] as const;
+
+  // Shared period navigator (reused for expenses + incomes tabs)
+  const PeriodNav = () => (
+    <div className="flex items-center justify-between">
+      <button
+        onClick={() => setPeriod((p) => subMonths(p, 1))}
+        className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
+      >
+        <ChevronLeft className="w-4 h-4" />
+      </button>
+      <div className="flex items-center gap-2">
+        <span className="font-semibold text-sm capitalize">
+          {format(period, 'MMMM yyyy')}
+        </span>
+        {format(period, 'yyyy-MM') !== format(new Date(), 'yyyy-MM') && (
+          <button
+            onClick={() => setPeriod(startOfMonth(new Date()))}
+            className="text-xs text-budget underline"
+          >
+            Aujourd'hui
+          </button>
+        )}
+      </div>
+      <button
+        onClick={() => setPeriod((p) => addMonths(p, 1))}
+        className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
+      >
+        <ChevronRight className="w-4 h-4" />
+      </button>
+    </div>
+  );
 
   return (
     <div>
@@ -539,6 +585,11 @@ export function BudgetPage() {
         {tab === 'expenses' && (
           <Button size="sm" onClick={openCreateExpense}>
             <Plus className="w-4 h-4 mr-1" /> Dépense
+          </Button>
+        )}
+        {tab === 'incomes' && (
+          <Button size="sm" onClick={openCreateIncome} className="bg-green-600 hover:bg-green-700">
+            <Plus className="w-4 h-4 mr-1" /> Revenu
           </Button>
         )}
         {tab === 'envelopes' && (
@@ -559,13 +610,13 @@ export function BudgetPage() {
       </div>
 
       {/* ── Tab bar ─────────────────────────────────────────────────── */}
-      <div className="flex gap-1 mb-6 bg-gray-100 dark:bg-gray-800 rounded-xl p-1">
+      <div className="flex gap-1 mb-6 bg-gray-100 dark:bg-gray-800 rounded-xl p-1 overflow-x-auto">
         {tabs.map(({ key, label, icon: Icon }) => (
           <button
             key={key}
             onClick={() => setTab(key)}
             className={clsx(
-              'flex-1 flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-medium transition-colors',
+              'flex-shrink-0 flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg text-xs font-medium transition-colors',
               tab === key
                 ? 'bg-white dark:bg-gray-700 text-budget shadow-sm'
                 : 'text-gray-500 hover:text-gray-700',
@@ -581,23 +632,57 @@ export function BudgetPage() {
           TAB: Vue d'ensemble
       ═══════════════════════════════════════════════════════════════ */}
       {tab === 'overview' && (
-        <div className="space-y-6">
-          {/* Summary cards */}
+        <div className="space-y-5">
+
+          {/* Balance card — prominent */}
+          <div className={clsx(
+            'card p-5 text-center border-2',
+            (summary?.balance ?? 0) >= 0
+              ? 'border-green-200 dark:border-green-800'
+              : 'border-red-200 dark:border-red-800',
+          )}>
+            <p className="text-xs text-gray-500 mb-1">Solde du mois</p>
+            <p className={clsx(
+              'text-3xl font-extrabold',
+              (summary?.balance ?? 0) >= 0 ? 'text-green-600' : 'text-red-500',
+            )}>
+              {summary
+                ? `${summary.balance >= 0 ? '+' : ''}${summary.balance.toFixed(2)} €`
+                : '—'}
+            </p>
+            {summary && summary.totalIncome > 0 && (
+              <p className={clsx(
+                'text-sm mt-1 font-medium',
+                summary.savingsRate >= 0 ? 'text-green-500' : 'text-red-400',
+              )}>
+                Taux d'épargne : {summary.savingsRate.toFixed(1)} %
+              </p>
+            )}
+          </div>
+
+          {/* Stats row */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="card p-4">
-              <p className="text-xs text-gray-500 mb-1">Ce mois</p>
-              <p className="text-xl font-bold">{summary?.totalSpent.toFixed(2) ?? '—'} €</p>
+              <p className="text-xs text-gray-500 mb-1">Dépenses</p>
+              <p className="text-xl font-bold text-red-500">
+                {summary?.totalSpent.toFixed(2) ?? '—'} €
+              </p>
+              {lastMonthExpenses != null && summary?.totalSpent != null && (
+                <div className="flex items-center gap-1 mt-0.5">
+                  {summary.totalSpent > lastMonthExpenses
+                    ? <TrendingUp className="w-3.5 h-3.5 text-red-400" />
+                    : <TrendingDown className="w-3.5 h-3.5 text-green-400" />}
+                  <span className="text-xs text-gray-400">
+                    {lastMonthExpenses.toFixed(0)} € le mois passé
+                  </span>
+                </div>
+              )}
             </div>
             <div className="card p-4">
-              <p className="text-xs text-gray-500 mb-1">Mois dernier</p>
-              <div className="flex items-center gap-1">
-                <p className="text-xl font-bold">{lastMonthTotal?.toFixed(2) ?? '—'} €</p>
-                {lastMonthTotal != null && summary?.totalSpent != null && (
-                  summary.totalSpent > lastMonthTotal
-                    ? <TrendingUp className="w-4 h-4 text-red-500" />
-                    : <TrendingDown className="w-4 h-4 text-green-500" />
-                )}
-              </div>
+              <p className="text-xs text-gray-500 mb-1">Revenus</p>
+              <p className="text-xl font-bold text-green-600">
+                {summary?.totalIncome.toFixed(2) ?? '—'} €
+              </p>
             </div>
             <div className="card p-4">
               <p className="text-xs text-gray-500 mb-1">Enveloppes</p>
@@ -609,31 +694,41 @@ export function BudgetPage() {
             </div>
           </div>
 
-          {/* Bar chart — monthly trend */}
+          {/* Grouped bar chart — expenses vs income */}
           <div className="card p-4">
-            <h3 className="font-semibold text-sm mb-4">Dépenses sur 12 mois</h3>
-            {chartData.some((d) => d.total > 0) ? (
-              <ResponsiveContainer width="100%" height={180}>
+            <h3 className="font-semibold text-sm mb-4">Revenus vs Dépenses (12 mois)</h3>
+            {chartData.some((d) => d.expenses > 0 || d.income > 0) ? (
+              <ResponsiveContainer width="100%" height={190}>
                 <BarChart data={chartData} margin={{ top: 4, right: 4, left: -16, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
                   <XAxis dataKey="label" tick={{ fontSize: 10 }} />
                   <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => `${v}€`} />
                   <Tooltip
-                    formatter={(v: number) => [`${v.toFixed(2)} €`, 'Dépenses']}
-                    cursor={{ fill: 'rgba(139,92,246,0.08)' }}
+                    formatter={(v: number, name: string) => [
+                      `${v.toFixed(2)} €`,
+                      name === 'expenses' ? 'Dépenses' : 'Revenus',
+                    ]}
+                    cursor={{ fill: 'rgba(139,92,246,0.06)' }}
                   />
-                  <Bar dataKey="total" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                  <Legend
+                    formatter={(name) => name === 'expenses' ? 'Dépenses' : 'Revenus'}
+                    iconType="circle"
+                    iconSize={8}
+                    wrapperStyle={{ fontSize: 11 }}
+                  />
+                  <Bar dataKey="income"   fill="#22c55e" radius={[3, 3, 0, 0]} name="income" />
+                  <Bar dataKey="expenses" fill="#8b5cf6" radius={[3, 3, 0, 0]} name="expenses" />
                 </BarChart>
               </ResponsiveContainer>
             ) : (
-              <p className="text-sm text-gray-400 text-center py-8">Aucune dépense enregistrée</p>
+              <p className="text-sm text-gray-400 text-center py-8">Aucune donnée enregistrée</p>
             )}
           </div>
 
           {/* Category breakdown */}
           {summary && summary.byCategory.length > 0 && (
             <div className="card p-4">
-              <h3 className="font-semibold text-sm mb-4">Répartition ce mois</h3>
+              <h3 className="font-semibold text-sm mb-4">Répartition des dépenses ce mois</h3>
               <div className="space-y-2.5">
                 {summary.byCategory.slice(0, 8).map((cat) => (
                   <div key={cat.category} className="flex items-center gap-3">
@@ -660,10 +755,15 @@ export function BudgetPage() {
             </div>
           )}
 
-          {/* Quick expense button */}
-          <Button onClick={openCreateExpense} variant="secondary" className="w-full">
-            <Plus className="w-4 h-4 mr-2" /> Ajouter une dépense
-          </Button>
+          {/* Quick actions */}
+          <div className="grid grid-cols-2 gap-3">
+            <Button onClick={openCreateExpense} variant="secondary">
+              <Plus className="w-4 h-4 mr-2" /> Dépense
+            </Button>
+            <Button onClick={openCreateIncome} className="bg-green-600 hover:bg-green-700 text-white">
+              <Plus className="w-4 h-4 mr-2" /> Revenu
+            </Button>
+          </div>
         </div>
       )}
 
@@ -672,34 +772,7 @@ export function BudgetPage() {
       ═══════════════════════════════════════════════════════════════ */}
       {tab === 'expenses' && (
         <div className="space-y-4">
-          {/* Period navigator */}
-          <div className="flex items-center justify-between">
-            <button
-              onClick={() => setPeriod((p) => subMonths(p, 1))}
-              className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-            <div className="flex items-center gap-2">
-              <span className="font-semibold text-sm capitalize">
-                {format(period, 'MMMM yyyy')}
-              </span>
-              {format(period, 'yyyy-MM') !== format(new Date(), 'yyyy-MM') && (
-                <button
-                  onClick={() => setPeriod(startOfMonth(new Date()))}
-                  className="text-xs text-budget underline"
-                >
-                  Aujourd'hui
-                </button>
-              )}
-            </div>
-            <button
-              onClick={() => setPeriod((p) => addMonths(p, 1))}
-              className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
-            >
-              <ChevronRight className="w-4 h-4" />
-            </button>
-          </div>
+          <PeriodNav />
 
           {/* Search */}
           <div className="relative">
@@ -713,7 +786,6 @@ export function BudgetPage() {
             />
           </div>
 
-          {/* Total */}
           {expenses.length > 0 && (
             <div className="flex items-center justify-between text-sm text-gray-500 px-1">
               <span>{totalExpenses} dépense{totalExpenses > 1 ? 's' : ''}</span>
@@ -723,7 +795,6 @@ export function BudgetPage() {
             </div>
           )}
 
-          {/* Expense list */}
           <div className="card divide-y divide-gray-100 dark:divide-gray-700">
             {expenses.length === 0 ? (
               <EmptyState
@@ -756,6 +827,87 @@ export function BudgetPage() {
                     </button>
                     <button
                       onClick={() => setDeleteConfirm({ type: 'expense', id: exp._id })}
+                      className="p-1 text-gray-400 hover:text-red-500"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════
+          TAB: Revenus
+      ═══════════════════════════════════════════════════════════════ */}
+      {tab === 'incomes' && (
+        <div className="space-y-4">
+          <PeriodNav />
+
+          {/* Period summary */}
+          {incomes.length > 0 && (
+            <div className="card p-4 flex items-center justify-between bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
+              <div>
+                <p className="text-xs text-green-600 dark:text-green-400">
+                  {totalIncomes} entrée{totalIncomes > 1 ? 's' : ''} ce mois
+                </p>
+                <p className="text-2xl font-bold text-green-700 dark:text-green-400">
+                  +{incomes.reduce((s, i) => s + i.amount, 0).toFixed(2)} €
+                </p>
+              </div>
+              {summary && summary.totalSpent > 0 && summary.totalIncome > 0 && (
+                <div className="text-right">
+                  <p className="text-xs text-gray-500">Solde</p>
+                  <p className={clsx(
+                    'text-lg font-bold',
+                    summary.balance >= 0 ? 'text-green-600' : 'text-red-500',
+                  )}>
+                    {summary.balance >= 0 ? '+' : ''}{summary.balance.toFixed(2)} €
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="card divide-y divide-gray-100 dark:divide-gray-700">
+            {incomes.length === 0 ? (
+              <EmptyState
+                icon={<Banknote className="w-10 h-10" />}
+                title="Aucun revenu ce mois"
+                description="Enregistrez vos salaires, freelance, loyers perçus…"
+                action={<Button size="sm" onClick={openCreateIncome} className="bg-green-600 hover:bg-green-700 text-white">Ajouter un revenu</Button>}
+              />
+            ) : (
+              incomes.map((inc) => (
+                <div key={inc._id} className="flex items-center gap-3 px-4 py-3 group">
+                  <div
+                    className="w-3 h-3 rounded-full flex-shrink-0"
+                    style={{ backgroundColor: INCOME_COLORS[inc.category] ?? '#6b7280' }}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{inc.description ?? inc.category}</p>
+                    <p className="text-xs text-gray-400">
+                      {INCOME_CATEGORY_LABELS[inc.category as keyof typeof INCOME_CATEGORY_LABELS] ?? inc.category}
+                      {' · '}
+                      {format(new Date(inc.date), 'dd/MM/yyyy')}
+                    </p>
+                  </div>
+                  {inc.isRecurring && (
+                    <span className="text-xs bg-green-100 dark:bg-green-900/30 text-green-600 px-2 py-0.5 rounded-full">
+                      Récurrent
+                    </span>
+                  )}
+                  <span className="font-semibold text-sm text-green-600 whitespace-nowrap">
+                    +{inc.amount.toFixed(2)} €
+                  </span>
+                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={() => openEditIncome(inc)} className="p-1 text-gray-400 hover:text-budget">
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => setDeleteConfirm({ type: 'income', id: inc._id })}
                       className="p-1 text-gray-400 hover:text-red-500"
                     >
                       <Trash2 className="w-4 h-4" />
@@ -814,8 +966,6 @@ export function BudgetPage() {
                         </button>
                       </div>
                     </div>
-
-                    {/* Progress bar */}
                     <div className="mb-2">
                       <div className="flex items-center justify-between text-xs mb-1">
                         <span className={envelopeColor(env.spentAmount, env.budgetedAmount)}>
@@ -830,14 +980,11 @@ export function BudgetPage() {
                         />
                       </div>
                     </div>
-
                     <div className="flex items-center justify-between text-xs">
                       <span className={clsx('font-medium', remaining < 0 ? 'text-red-500' : 'text-gray-500')}>
                         {remaining < 0 ? `Dépassement : ${Math.abs(remaining).toFixed(2)} €` : `Restant : ${remaining.toFixed(2)} €`}
                       </span>
-                      <span
-                        className={clsx('font-semibold', envelopeColor(env.spentAmount, env.budgetedAmount))}
-                      >
+                      <span className={clsx('font-semibold', envelopeColor(env.spentAmount, env.budgetedAmount))}>
                         {Math.round(pct * 100)}%
                       </span>
                     </div>
@@ -869,7 +1016,6 @@ export function BudgetPage() {
                 const alert = deadlineAlert(goal);
                 return (
                   <div key={goal._id} className={clsx('card p-4 relative group', goal.isCompleted && 'opacity-75')}>
-                    {/* Header */}
                     <div className="flex items-start justify-between mb-3">
                       <div className="flex items-center gap-2">
                         {goal.icon ? (
@@ -905,8 +1051,6 @@ export function BudgetPage() {
                         </button>
                       </div>
                     </div>
-
-                    {/* Progress */}
                     <div className="mb-2">
                       <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-3">
                         <div
@@ -915,7 +1059,6 @@ export function BudgetPage() {
                         />
                       </div>
                     </div>
-
                     <div className="flex items-center justify-between text-sm mb-3">
                       <span className="text-gray-500">
                         {goal.currentAmount.toFixed(2)} / {goal.targetAmount.toFixed(2)} {goal.currency}
@@ -924,22 +1067,16 @@ export function BudgetPage() {
                         {Math.round(pct)}%
                       </span>
                     </div>
-
-                    {/* Projection */}
                     {projection && !goal.isCompleted && (
                       <p className="text-xs text-gray-400 mb-3">
                         À ce rythme, atteint en <span className="font-medium text-gray-600">{projection}</span>
                       </p>
                     )}
-
-                    {/* Contributions count */}
                     {goal.contributions.length > 0 && (
                       <p className="text-xs text-gray-400 mb-3">
                         {goal.contributions.length} contribution{goal.contributions.length > 1 ? 's' : ''}
                       </p>
                     )}
-
-                    {/* Contribute button */}
                     {!goal.isCompleted && (
                       <Button size="sm" variant="secondary" onClick={() => openContribute(goal)} className="w-full">
                         <Plus className="w-3.5 h-3.5 mr-1" /> Contribuer
@@ -959,13 +1096,10 @@ export function BudgetPage() {
       {tab === 'recurring' && (() => {
         const activeRecurring = recurring.filter((r) => r.isActive);
         const inactive = recurring.filter((r) => !r.isActive);
-
-        // Monthly equivalent total
         const monthlyTotal = activeRecurring.reduce(
           (sum, r) => sum + r.amount * (RECURRING_MONTHLY_FACTOR[r.frequency] ?? 1),
           0,
         );
-
         const overdue  = activeRecurring.filter((r) => recurringStatus(r.nextDueDate) === 'overdue');
         const soon     = activeRecurring.filter((r) => recurringStatus(r.nextDueDate) === 'soon');
         const upcoming = activeRecurring.filter((r) => recurringStatus(r.nextDueDate) === 'upcoming');
@@ -974,10 +1108,7 @@ export function BudgetPage() {
           const days = daysUntilDue(r.nextDueDate);
           const status = recurringStatus(r.nextDueDate);
           return (
-            <div className={clsx(
-              'card p-4 relative group',
-              !r.isActive && 'opacity-50',
-            )}>
+            <div className={clsx('card p-4 relative group', !r.isActive && 'opacity-50')}>
               <div className="flex items-start gap-3">
                 <div
                   className="w-2.5 h-2.5 rounded-full flex-shrink-0 mt-1.5"
@@ -989,30 +1120,24 @@ export function BudgetPage() {
                     <span className="font-bold text-sm whitespace-nowrap">{r.amount.toFixed(2)} €</span>
                   </div>
                   <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                    <span className="text-xs text-gray-400">
-                      {CATEGORY_LABELS[r.category] ?? r.category}
-                    </span>
+                    <span className="text-xs text-gray-400">{CATEGORY_LABELS[r.category] ?? r.category}</span>
                     <span className="text-xs bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded">
                       {RECURRING_FREQUENCY_LABELS[r.frequency]}
                     </span>
                     {r.isActive && (
                       <span className={clsx(
                         'text-xs font-medium px-1.5 py-0.5 rounded-full',
-                        status === 'overdue' && 'bg-red-100 text-red-600 dark:bg-red-900/30',
-                        status === 'soon'    && 'bg-orange-100 text-orange-600 dark:bg-orange-900/30',
-                        status === 'upcoming'&& 'bg-green-100 text-green-600 dark:bg-green-900/30',
+                        status === 'overdue'  && 'bg-red-100 text-red-600 dark:bg-red-900/30',
+                        status === 'soon'     && 'bg-orange-100 text-orange-600 dark:bg-orange-900/30',
+                        status === 'upcoming' && 'bg-green-100 text-green-600 dark:bg-green-900/30',
                       )}>
-                        {status === 'overdue'
-                          ? `En retard de ${Math.abs(days)}j`
-                          : days === 0
-                          ? "Aujourd'hui"
+                        {status === 'overdue' ? `En retard de ${Math.abs(days)}j`
+                          : days === 0 ? "Aujourd'hui"
                           : `J-${days}`}
                       </span>
                     )}
                   </div>
-                  {r.description && (
-                    <p className="text-xs text-gray-400 mt-0.5 truncate">{r.description}</p>
-                  )}
+                  {r.description && <p className="text-xs text-gray-400 mt-0.5 truncate">{r.description}</p>}
                   {r.lastPaidAt && (
                     <p className="text-xs text-gray-400 mt-0.5">
                       Dernier paiement : {format(new Date(r.lastPaidAt), 'dd/MM/yyyy')}
@@ -1020,16 +1145,9 @@ export function BudgetPage() {
                   )}
                 </div>
               </div>
-
-              {/* Actions */}
               <div className="flex items-center gap-2 mt-3">
                 {r.isActive && (
-                  <Button
-                    size="sm"
-                    onClick={() => payRecurring(r)}
-                    isLoading={payingId === r._id}
-                    className="flex-1"
-                  >
+                  <Button size="sm" onClick={() => payRecurring(r)} isLoading={payingId === r._id} className="flex-1">
                     Payer maintenant
                   </Button>
                 )}
@@ -1051,7 +1169,6 @@ export function BudgetPage() {
 
         return (
           <div className="space-y-6">
-            {/* Summary bar */}
             {activeRecurring.length > 0 && (
               <div className="card p-4 flex items-center justify-between">
                 <div>
@@ -1086,34 +1203,25 @@ export function BudgetPage() {
                     </div>
                   </div>
                 )}
-
                 {soon.length > 0 && (
                   <div>
-                    <h3 className="text-sm font-semibold text-orange-500 mb-3">
-                      Cette semaine ({soon.length})
-                    </h3>
+                    <h3 className="text-sm font-semibold text-orange-500 mb-3">Cette semaine ({soon.length})</h3>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       {soon.map((r) => <RecurringCard key={r._id} r={r} />)}
                     </div>
                   </div>
                 )}
-
                 {upcoming.length > 0 && (
                   <div>
-                    <h3 className="text-sm font-semibold text-gray-500 mb-3">
-                      À venir ({upcoming.length})
-                    </h3>
+                    <h3 className="text-sm font-semibold text-gray-500 mb-3">À venir ({upcoming.length})</h3>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       {upcoming.map((r) => <RecurringCard key={r._id} r={r} />)}
                     </div>
                   </div>
                 )}
-
                 {inactive.length > 0 && (
                   <div>
-                    <h3 className="text-sm font-semibold text-gray-400 mb-3">
-                      Désactivés ({inactive.length})
-                    </h3>
+                    <h3 className="text-sm font-semibold text-gray-400 mb-3">Désactivés ({inactive.length})</h3>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       {inactive.map((r) => <RecurringCard key={r._id} r={r} />)}
                     </div>
@@ -1137,10 +1245,7 @@ export function BudgetPage() {
       >
         <div className="space-y-4">
           <Input
-            label="Montant (€)"
-            type="number"
-            step="0.01"
-            min="0"
+            label="Montant (€)" type="number" step="0.01" min="0"
             value={expenseForm.amount}
             onChange={(e) => setExpenseForm((f) => ({ ...f, amount: e.target.value }))}
             required
@@ -1164,8 +1269,7 @@ export function BudgetPage() {
             required
           />
           <Input
-            label="Date"
-            type="date"
+            label="Date" type="date"
             value={expenseForm.date}
             onChange={(e) => setExpenseForm((f) => ({ ...f, date: e.target.value }))}
           />
@@ -1178,12 +1282,64 @@ export function BudgetPage() {
             />
             Dépense récurrente
           </label>
-          <Button
-            onClick={saveExpense}
-            className="w-full"
-            disabled={!expenseForm.amount || !expenseForm.description}
-          >
+          <Button onClick={saveExpense} className="w-full" disabled={!expenseForm.amount || !expenseForm.description}>
             {expenseModal?.mode === 'edit' ? 'Enregistrer' : 'Ajouter'}
+          </Button>
+        </div>
+      </Modal>
+
+      {/* Income modal */}
+      <Modal
+        isOpen={!!incomeModal}
+        onClose={() => setIncomeModal(null)}
+        title={incomeModal?.mode === 'edit' ? 'Modifier le revenu' : 'Nouveau revenu'}
+      >
+        <div className="space-y-4">
+          <Input
+            label="Montant (€)" type="number" step="0.01" min="0"
+            value={incomeForm.amount}
+            onChange={(e) => setIncomeForm((f) => ({ ...f, amount: e.target.value }))}
+            required
+          />
+          <div>
+            <label className="block text-sm font-medium mb-1">Catégorie</label>
+            <select
+              value={incomeForm.category}
+              onChange={(e) => setIncomeForm((f) => ({ ...f, category: e.target.value }))}
+              className="input-field"
+            >
+              {INCOME_CATEGORIES.map((c) => (
+                <option key={c} value={c}>{INCOME_CATEGORY_LABELS[c]}</option>
+              ))}
+            </select>
+          </div>
+          <Input
+            label="Description"
+            value={incomeForm.description}
+            onChange={(e) => setIncomeForm((f) => ({ ...f, description: e.target.value }))}
+            placeholder="Salaire mai, Mission freelance ABC…"
+            required
+          />
+          <Input
+            label="Date" type="date"
+            value={incomeForm.date}
+            onChange={(e) => setIncomeForm((f) => ({ ...f, date: e.target.value }))}
+          />
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              checked={incomeForm.isRecurring}
+              onChange={(e) => setIncomeForm((f) => ({ ...f, isRecurring: e.target.checked }))}
+              className="rounded"
+            />
+            Revenu récurrent (salaire mensuel, etc.)
+          </label>
+          <Button
+            onClick={saveIncome}
+            className="w-full bg-green-600 hover:bg-green-700 text-white"
+            disabled={!incomeForm.amount || !incomeForm.description}
+          >
+            {incomeModal?.mode === 'edit' ? 'Enregistrer' : 'Ajouter'}
           </Button>
         </div>
       </Modal>
@@ -1214,10 +1370,7 @@ export function BudgetPage() {
             </div>
           </div>
           <Input
-            label="Budget (€)"
-            type="number"
-            step="0.01"
-            min="0"
+            label="Budget (€)" type="number" step="0.01" min="0"
             value={envelopeForm.budgetedAmount}
             onChange={(e) => setEnvelopeForm((f) => ({ ...f, budgetedAmount: e.target.value }))}
             required
@@ -1271,8 +1424,7 @@ export function BudgetPage() {
             </div>
           </div>
           <Button
-            onClick={saveEnvelope}
-            className="w-full"
+            onClick={saveEnvelope} className="w-full"
             disabled={!envelopeForm.name || !envelopeForm.budgetedAmount}
           >
             {envelopeModal?.mode === 'edit' ? 'Enregistrer' : 'Créer'}
@@ -1310,14 +1462,10 @@ export function BudgetPage() {
                 <button
                   key={emoji}
                   type="button"
-                  onClick={() =>
-                    setGoalForm((f) => ({ ...f, icon: f.icon === emoji ? '' : emoji }))
-                  }
+                  onClick={() => setGoalForm((f) => ({ ...f, icon: f.icon === emoji ? '' : emoji }))}
                   className={clsx(
                     'text-xl p-1.5 rounded-lg transition-colors hover:bg-gray-100 dark:hover:bg-gray-700',
-                    goalForm.icon === emoji
-                      ? 'bg-budget/15 ring-2 ring-budget ring-offset-1'
-                      : '',
+                    goalForm.icon === emoji ? 'bg-budget/15 ring-2 ring-budget ring-offset-1' : '',
                   )}
                 >
                   {emoji}
@@ -1331,25 +1479,17 @@ export function BudgetPage() {
             )}
           </div>
           <Input
-            label="Montant cible (€)"
-            type="number"
-            step="0.01"
-            min="0"
+            label="Montant cible (€)" type="number" step="0.01" min="0"
             value={goalForm.targetAmount}
             onChange={(e) => setGoalForm((f) => ({ ...f, targetAmount: e.target.value }))}
             required
           />
           <Input
-            label="Échéance (optionnel)"
-            type="date"
+            label="Échéance (optionnel)" type="date"
             value={goalForm.deadline}
             onChange={(e) => setGoalForm((f) => ({ ...f, deadline: e.target.value }))}
           />
-          <Button
-            onClick={saveGoal}
-            className="w-full"
-            disabled={!goalForm.name || !goalForm.targetAmount}
-          >
+          <Button onClick={saveGoal} className="w-full" disabled={!goalForm.name || !goalForm.targetAmount}>
             {goalModal?.mode === 'edit' ? 'Enregistrer' : 'Créer'}
           </Button>
         </div>
@@ -1379,10 +1519,7 @@ export function BudgetPage() {
             </div>
           )}
           <Input
-            label="Montant (€)"
-            type="number"
-            step="0.01"
-            min="0"
+            label="Montant (€)" type="number" step="0.01" min="0"
             value={contributeForm.amount}
             onChange={(e) => setContributeForm((f) => ({ ...f, amount: e.target.value }))}
             required
@@ -1415,10 +1552,7 @@ export function BudgetPage() {
           <div className="flex gap-3">
             <div className="flex-1">
               <Input
-                label="Montant (€)"
-                type="number"
-                step="0.01"
-                min="0"
+                label="Montant (€)" type="number" step="0.01" min="0"
                 value={recurringForm.amount}
                 onChange={(e) => setRecurringForm((f) => ({ ...f, amount: e.target.value }))}
                 required
@@ -1458,8 +1592,7 @@ export function BudgetPage() {
             </div>
           </div>
           <Input
-            label="Date de début"
-            type="date"
+            label="Date de début" type="date"
             value={recurringForm.startDate}
             onChange={(e) => setRecurringForm((f) => ({ ...f, startDate: e.target.value }))}
           />
@@ -1470,8 +1603,7 @@ export function BudgetPage() {
             placeholder="Détails..."
           />
           <Button
-            onClick={saveRecurring}
-            className="w-full"
+            onClick={saveRecurring} className="w-full"
             disabled={!recurringForm.name || !recurringForm.amount}
           >
             {recurringModal?.mode === 'edit' ? 'Enregistrer' : 'Créer'}
@@ -1488,6 +1620,7 @@ export function BudgetPage() {
         <div className="space-y-4">
           <p className="text-sm text-gray-600 dark:text-gray-400">
             {deleteConfirm?.type === 'expense'   && 'Supprimer cette dépense ? Cette action est irréversible.'}
+            {deleteConfirm?.type === 'income'    && 'Supprimer ce revenu ? Cette action est irréversible.'}
             {deleteConfirm?.type === 'goal'      && 'Supprimer cet objectif et toutes ses contributions ? Cette action est irréversible.'}
             {deleteConfirm?.type === 'envelope'  && 'Supprimer cette enveloppe ? Cette action est irréversible.'}
             {deleteConfirm?.type === 'recurring' && 'Supprimer cette dépense récurrente ? Les dépenses déjà générées seront conservées.'}

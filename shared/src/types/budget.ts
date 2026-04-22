@@ -1,3 +1,23 @@
+export const INCOME_CATEGORIES = [
+  'salary',
+  'freelance',
+  'rental',
+  'investment',
+  'gift',
+  'other',
+] as const;
+
+export type IncomeCategory = (typeof INCOME_CATEGORIES)[number];
+
+export const INCOME_CATEGORY_LABELS: Record<IncomeCategory, string> = {
+  salary:     'Salaire',
+  freelance:  'Freelance',
+  rental:     'Loyer perçu',
+  investment: 'Investissement',
+  gift:       'Don / Cadeau',
+  other:      'Autre',
+};
+
 export const EXPENSE_CATEGORIES = [
   'groceries',
   'utilities',
@@ -113,6 +133,20 @@ export const RECURRING_MONTHLY_FACTOR: Record<RecurringFrequency, number> = {
   yearly: 1 / 12,
 };
 
+export interface Income {
+  _id: string;
+  familyId: string;
+  amount: number;
+  currency: string;
+  category: string;
+  description?: string | null;
+  date: string;
+  receivedBy: { id: string; firstName: string; lastName: string };
+  isRecurring: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface RecurringExpense {
   _id: string;
   familyId: string;
@@ -132,7 +166,10 @@ export interface RecurringExpense {
 
 export interface BudgetSummary {
   totalSpent: number;
+  totalIncome: number;
+  balance: number;     // totalIncome - totalSpent
+  savingsRate: number; // (balance / totalIncome) * 100, or 0 when no income
   byCategory: { category: string; total: number }[];
-  monthlyTrend: { month: string; total: number }[];
+  monthlyTrend: { month: string; expenses: number; income: number }[];
   period: { year: number; month: number };
 }

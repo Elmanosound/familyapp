@@ -137,23 +137,44 @@ export async function getBudgetSummary(req: Request, res: Response, next: NextFu
       .map(([category, total]) => ({ category, total }))
       .sort((a, b) => b.total - a.total);
 
-    const twelveMonthsAgo = new Date(year, month - 1 - 11, 1);
-    const allExpenses = await prisma.expense.findMany({
-      where: { familyId, date: { gte: twelveMonthsAgo } },
-      select: { amount: true, date: true },
-      orderBy: { date: 'asc' },
+    // Income for current period
+    const currentMonthIncomes = await prisma.income.findMany({
+      where: { familyId, date: { gte: startOfMonth, lte: endOfMonth } },
+      select: { amount: true },
     });
+    const totalIncome = currentMonthIncomes.reduce((s, i) => s + i.amount, 0);
+    const balance = totalIncome - totalSpent;
+    const savingsRate = totalIncome > 0 ? (balance / totalIncome) * 100 : 0;
 
-    const monthMap = new Map<string, number>();
+    // 12-month trend (expenses + income)
+    const twelveMonthsAgo = new Date(year, month - 1 - 11, 1);
+    const [allExpenses, allIncomes] = await Promise.all([
+      prisma.expense.findMany({
+        where: { familyId, date: { gte: twelveMonthsAgo } },
+        select: { amount: true, date: true },
+      }),
+      prisma.income.findMany({
+        where: { familyId, date: { gte: twelveMonthsAgo } },
+        select: { amount: true, date: true },
+      }),
+    ]);
+
+    const expMonthMap = new Map<string, number>();
     for (const exp of allExpenses) {
       const key = `${exp.date.getFullYear()}-${String(exp.date.getMonth() + 1).padStart(2, '0')}`;
-      monthMap.set(key, (monthMap.get(key) ?? 0) + exp.amount);
+      expMonthMap.set(key, (expMonthMap.get(key) ?? 0) + exp.amount);
     }
-    const monthlyTrend = Array.from(monthMap.entries())
-      .map(([m, total]) => ({ month: m, total }))
+    const incMonthMap = new Map<string, number>();
+    for (const inc of allIncomes) {
+      const key = `${inc.date.getFullYear()}-${String(inc.date.getMonth() + 1).padStart(2, '0')}`;
+      incMonthMap.set(key, (incMonthMap.get(key) ?? 0) + inc.amount);
+    }
+    const allKeys = new Set([...expMonthMap.keys(), ...incMonthMap.keys()]);
+    const monthlyTrend = Array.from(allKeys)
+      .map((m) => ({ month: m, expenses: expMonthMap.get(m) ?? 0, income: incMonthMap.get(m) ?? 0 }))
       .sort((a, b) => a.month.localeCompare(b.month));
 
-    res.json({ totalSpent, byCategory, monthlyTrend, period: { year, month } });
+    res.json({ totalSpent, totalIncome, balance, savingsRate, byCategory, monthlyTrend, period: { year, month } });
   } catch (error) {
     next(error);
   }
@@ -507,6 +528,95 @@ export async function payRecurringExpense(req: Request, res: Response, next: Nex
     });
 
     res.json({ recurring: updated, expense });
+  } catch (error) {
+    next(error);
+  }
+}
+
+// ─── Incomes ──────────────────────────────────────────────────────────────────
+
+export async function getIncomes(req: Request, res: Response, next: NextFunction) {
+  try {
+    const familyId = req.params.familyId as string;
+    const { category, startDate, endDate, search, limit = '50', skip = '0' } = req.query;
+
+    const where: Record<string, unknown> = { familyId };
+    if (category) where.category = category as string;
+    if (startDate && endDate) {
+      where.date = {
+        gte: new Date(startDate as string),
+        lte: new Date(endDate as string),
+      };
+    }
+    if (search) {
+      where.description = { contains: search as string, mode: 'insensitive' };
+    }
+
+    const [incomes, total] = await Promise.all([
+      prisma.income.findMany({
+        where,
+        include: {
+          receivedBy: { select: { id: true, firstName: true, lastName: true } },
+        },
+        orderBy: { date: 'desc' },
+        skip: parseInt(skip as string, 10),
+        take: parseInt(limit as string, 10),
+      }),
+      prisma.income.count({ where }),
+    ]);
+
+    res.json({ incomes, total });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function createIncome(req: Request, res: Response, next: NextFunction) {
+  try {
+    const income = await prisma.income.create({
+      data: {
+        amount:      req.body.amount,
+        currency:    req.body.currency ?? 'EUR',
+        category:    req.body.category,
+        description: req.body.description ?? null,
+        date:        new Date(req.body.date),
+        isRecurring: req.body.isRecurring ?? false,
+        familyId:    req.params.familyId as string,
+        receivedById: req.user!.id,
+      },
+      include: {
+        receivedBy: { select: { id: true, firstName: true, lastName: true } },
+      },
+    });
+    res.status(201).json({ income });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function updateIncome(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { date, ...rest } = req.body;
+    const income = await prisma.income.update({
+      where: { id: req.params.incomeId as string },
+      data: {
+        ...rest,
+        ...(date !== undefined && { date: new Date(date) }),
+      },
+      include: {
+        receivedBy: { select: { id: true, firstName: true, lastName: true } },
+      },
+    });
+    res.json({ income });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function deleteIncome(req: Request, res: Response, next: NextFunction) {
+  try {
+    await prisma.income.delete({ where: { id: req.params.incomeId as string } });
+    res.json({ message: 'Income deleted' });
   } catch (error) {
     next(error);
   }
