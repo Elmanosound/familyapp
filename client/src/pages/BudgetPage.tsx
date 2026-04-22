@@ -33,6 +33,12 @@ const CATEGORY_COLORS: Record<string, string> = {
   clothing: '#14b8a6', housing: '#6366f1', dining: '#f97316',
   subscriptions: '#06b6d4', other: '#6b7280',
 };
+const GOAL_EMOJIS = [
+  '🏠', '🚗', '✈️', '🏖️', '🎓', '💒', '👶', '💻',
+  '🏋️', '🎸', '🎮', '📱', '🐕', '🌴', '💎', '🏔️',
+  '🚀', '🎯', '🛥️', '🎨', '🍕', '🏥', '⚡', '🌱',
+];
+
 const ENVELOPE_COLORS = [
   '#ef4444', '#f97316', '#f59e0b', '#22c55e',
   '#14b8a6', '#3b82f6', '#8b5cf6', '#ec4899', '#6b7280',
@@ -285,8 +291,8 @@ export function BudgetPage() {
       name: goalForm.name,
       targetAmount: parseFloat(goalForm.targetAmount),
       currency: goalForm.currency,
-      deadline: goalForm.deadline || undefined,
-      icon: goalForm.icon || undefined,
+      deadline: goalForm.deadline || null,
+      icon: goalForm.icon || null,   // null = supprime l'icône ; undefined serait ignoré par Prisma
     };
     try {
       if (goalModal?.mode === 'edit' && goalModal.data) {
@@ -999,23 +1005,48 @@ export function BudgetPage() {
         title={goalModal?.mode === 'edit' ? "Modifier l'objectif" : 'Nouvel objectif'}
       >
         <div className="space-y-4">
-          <div className="flex gap-2">
-            <div className="flex-1">
-              <Input
-                label="Nom"
-                value={goalForm.name}
-                onChange={(e) => setGoalForm((f) => ({ ...f, name: e.target.value }))}
-                required
-              />
+          <Input
+            label="Nom"
+            value={goalForm.name}
+            onChange={(e) => setGoalForm((f) => ({ ...f, name: e.target.value }))}
+            required
+          />
+          <div>
+            <label className="block text-sm font-medium mb-2">
+              Icône
+              {goalForm.icon && (
+                <button
+                  onClick={() => setGoalForm((f) => ({ ...f, icon: '' }))}
+                  className="ml-2 text-xs text-gray-400 hover:text-red-500 font-normal"
+                >
+                  Retirer
+                </button>
+              )}
+            </label>
+            <div className="grid grid-cols-8 gap-1.5">
+              {GOAL_EMOJIS.map((emoji) => (
+                <button
+                  key={emoji}
+                  type="button"
+                  onClick={() =>
+                    setGoalForm((f) => ({ ...f, icon: f.icon === emoji ? '' : emoji }))
+                  }
+                  className={clsx(
+                    'text-xl p-1.5 rounded-lg transition-colors hover:bg-gray-100 dark:hover:bg-gray-700',
+                    goalForm.icon === emoji
+                      ? 'bg-budget/15 ring-2 ring-budget ring-offset-1'
+                      : '',
+                  )}
+                >
+                  {emoji}
+                </button>
+              ))}
             </div>
-            <div className="w-24">
-              <Input
-                label="Icône"
-                value={goalForm.icon}
-                onChange={(e) => setGoalForm((f) => ({ ...f, icon: e.target.value }))}
-                placeholder="🏖️"
-              />
-            </div>
+            {goalForm.icon && (
+              <p className="text-xs text-gray-400 mt-1.5">
+                Sélectionné : <span className="text-base">{goalForm.icon}</span>
+              </p>
+            )}
           </div>
           <Input
             label="Montant cible (€)"
