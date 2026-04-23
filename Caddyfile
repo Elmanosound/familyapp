@@ -1,18 +1,73 @@
 # ============================================================
-#  Caddy reverse proxy — automatic HTTPS via Let's Encrypt
-#  Used only when the `caddy` service is enabled in docker-compose.yml
+#  FamilyApp — Caddy reverse proxy
+#
+#  Provides automatic HTTPS via Let's Encrypt.
+#  Requires:
+#    - A valid public domain pointing to this server's IP
+#    - Ports 80 and 443 open in the firewall / GCP security rules
+#    - DOMAIN set in .env  (e.g. DOMAIN=family.example.com)
+#
+#  Caddy handles:
+#    - TLS certificate issuance and renewal (automatic)
+#    - HTTP → HTTPS redirect (automatic)
+#    - Security headers (HSTS, X-Frame-Options, …)
+#    - WebSocket proxying for Socket.IO (transparent)
+#    - gzip compression
 # ============================================================
+
 {$DOMAIN} {
-    encode gzip
+
+    # ── Reverse proxy ─────────────────────────────────────────
     reverse_proxy app:8080 {
-        # WebSocket support for Socket.IO
-        header_up Host {host}
-        header_up X-Real-IP {remote}
-        header_up X-Forwarded-For {remote}
+        # Forward real client info to the Node.js app
+        header_up Host              {host}
+        header_up X-Real-IP         {remote_host}
+        header_up X-Forwarded-For   {remote_host}
         header_up X-Forwarded-Proto {scheme}
+
+        # Flush immediately — required for SSE and WebSocket streaming
+        flush_interval -1
+
+        # Keep connections alive long enough for Socket.IO heartbeats
+        # (Socket.IO default ping interval: 25 s, timeout: 20 s)
+        transport http {
+            keepalive            90s
+            keepalive_idle_conns 16
+        }
     }
-    # Long timeouts for WebSockets (chat)
+
+    # ── Compression ───────────────────────────────────────────
+    encode gzip
+
+    # ── Security headers ──────────────────────────────────────
+    # Note: CSP is tracked separately (audit item #12).
+    header {
+        # Remove server fingerprinting
+        -Server
+
+        # Force HTTPS for 1 year, include subdomains
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+
+        # Prevent embedding in iframes (clickjacking)
+        X-Frame-Options "SAMEORIGIN"
+
+        # Prevent MIME-type sniffing
+        X-Content-Type-Options "nosniff"
+
+        # Limit referrer information
+        Referrer-Policy "strict-origin-when-cross-origin"
+
+        # Restrict browser features
+        Permissions-Policy "geolocation=(self), camera=(self), microphone=()"
+    }
+
+    # ── Access logs ───────────────────────────────────────────
     log {
-        output stdout
+        output file /data/logs/access.log {
+            roll_size    10MiB
+            roll_keep    7
+            roll_keep_for 168h  # 7 days
+        }
+        format json
     }
 }
