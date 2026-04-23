@@ -8,6 +8,7 @@ import { fileURLToPath } from 'url';
 import routes from './routes/index.js';
 import { errorHandler } from './middleware/error.middleware.js';
 import { idAliasMiddleware } from './middleware/id-alias.middleware.js';
+import { globalLimiter } from './middleware/rate-limit.middleware.js';
 import { env } from './config/env.js';
 
 // ESM-safe __dirname replacement
@@ -15,6 +16,11 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+
+// Trust the first reverse-proxy hop (Caddy) so rate-limiters and
+// IP-based logic see the real client IP from X-Forwarded-For,
+// not the Docker gateway address.
+app.set('trust proxy', 1);
 
 // Middleware
 app.use(
@@ -40,8 +46,10 @@ const uploadsDir = path.resolve(__dirname, '..', 'uploads');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 app.use('/uploads', express.static(uploadsDir));
 
-// API routes
-app.use('/api/v1', routes);
+// API routes — global rate-limiter applied first as a safety net.
+// Per-route limiters (loginLimiter, authLimiter) add a stricter layer
+// on top of this for sensitive endpoints.
+app.use('/api/v1', globalLimiter, routes);
 
 // Health check (used by Cloud Run / docker healthcheck)
 app.get('/health', (_req, res) => {
