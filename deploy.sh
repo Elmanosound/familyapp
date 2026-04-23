@@ -18,14 +18,12 @@
 
 set -e
 
-# Load .env to detect DOMAIN (if present)
-# set -a auto-exports every variable defined while the file is sourced;
-# this handles special characters in secrets (base64, slashes, etc.)
+# Read only DOMAIN from .env to decide which Compose profile to use.
+# docker compose reads the full .env automatically for service config —
+# no need to source it here (sourcing can choke on special chars in secrets).
+DOMAIN=""
 if [ -f .env ]; then
-  set -a
-  # shellcheck source=/dev/null
-  . ./.env
-  set +a
+  DOMAIN=$(grep -E '^DOMAIN=' .env | cut -d'=' -f2- | tr -d '"' | tr -d "'" | tr -d ' ')
 fi
 
 # Choose profile based on whether DOMAIN is configured
