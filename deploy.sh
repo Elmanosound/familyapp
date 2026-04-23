@@ -19,9 +19,13 @@
 set -e
 
 # Load .env to detect DOMAIN (if present)
+# set -a auto-exports every variable defined while the file is sourced;
+# this handles special characters in secrets (base64, slashes, etc.)
 if [ -f .env ]; then
-  # shellcheck disable=SC2046
-  export $(grep -v '^#' .env | grep -v '^$' | xargs)
+  set -a
+  # shellcheck source=/dev/null
+  . ./.env
+  set +a
 fi
 
 # Choose profile based on whether DOMAIN is configured
