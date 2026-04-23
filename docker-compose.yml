@@ -1,31 +1,36 @@
 # ============================================================
 #  FamilyApp — Docker Compose stack
 #
-#  Usage (VM / NAS — no build required):
-#    cp .env.docker.example .env
-#    # Edit .env (set POSTGRES_PASSWORD, JWT_SECRET, JWT_REFRESH_SECRET)
+#  ── Mode HTTP (dev / LAN / test) ───────────────────────────
+#    cp .env.docker.example .env   # fill POSTGRES_PASSWORD, JWT_*
 #    docker compose pull && docker compose up -d
+#    → App accessible on http://<host>:8080
 #
-#  The image is built automatically by GitHub Actions on every push
-#  to main and pushed to ghcr.io. The VM only pulls — no compiler
-#  needed, deployment takes ~30 seconds instead of 80+ minutes.
+#  ── Mode HTTPS via Caddy (production) ──────────────────────
+#    1. DNS : point your domain A record to this server's IP
+#    2. Firewall : open ports 80 and 443 (GCP → security rules)
+#    3. In .env set:
+#         DOMAIN=family.example.com
+#         CLIENT_URL=https://family.example.com
+#         APP_PORT=127.0.0.1:8080   ← hides direct port from internet
+#    4. docker compose --profile https pull
+#       docker compose --profile https up -d
+#    → Caddy issues the TLS certificate automatically on first start.
 #
-#  To force a local build (dev):
-#    docker compose build && docker compose up -d
-#
-#  Works identically on:
-#    - a Compute Engine e2-micro VM (GCP free tier)
-#    - your home NAS (Ubuntu)
+#  The image is built by GitHub Actions on every push to main
+#  and pushed to ghcr.io — the server only pulls (~30 s).
 # ============================================================
 
 services:
+
+  # ── PostgreSQL ───────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
     container_name: familyapp-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-familyapp}
-      POSTGRES_USER: ${POSTGRES_USER:-familyapp}
+      POSTGRES_DB:       ${POSTGRES_DB:-familyapp}
+      POSTGRES_USER:     ${POSTGRES_USER:-familyapp}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -34,14 +39,14 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    # Postgres is NOT exposed to the host by default — only reachable from
-    # the `app` service via the internal network. Uncomment to expose:
+    # PostgreSQL is NOT exposed to the host — only reachable from
+    # the app service via the internal Docker network.
+    # Uncomment for local debugging only:
     # ports:
-    #   - "5432:5432"
+    #   - "127.0.0.1:5432:5432"
 
+  # ── Application ──────────────────────────────────────────────
   app:
-    # Image built by GitHub Actions and pushed to ghcr.io on every
-    # merge to main. The VM just pulls — no build step, no compiler.
     image: ghcr.io/elmanosound/familyapp:latest
     container_name: familyapp-app
     restart: unless-stopped
@@ -49,47 +54,57 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      NODE_ENV: production
-      PORT: 8080
-      DATABASE_URL: postgresql://${POSTGRES_USER:-familyapp}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-familyapp}?schema=public
-      CLIENT_URL: ${CLIENT_URL:-http://localhost:8080}
-      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET is required}
-      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-15m}
+      NODE_ENV:               production
+      PORT:                   8080
+      DATABASE_URL:           postgresql://${POSTGRES_USER:-familyapp}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-familyapp}?schema=public
+      CLIENT_URL:             ${CLIENT_URL:-http://localhost:8080}
+      JWT_SECRET:             ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_REFRESH_SECRET:     ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET is required}
+      JWT_EXPIRES_IN:         ${JWT_EXPIRES_IN:-15m}
       JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-7d}
       # Optional integrations — leave empty to disable
-      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-}
-      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY:-}
-      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET:-}
-      SMTP_HOST: ${SMTP_HOST:-}
-      SMTP_PORT: ${SMTP_PORT:-587}
-      SMTP_USER: ${SMTP_USER:-}
-      SMTP_PASS: ${SMTP_PASS:-}
+      CLOUDINARY_CLOUD_NAME:  ${CLOUDINARY_CLOUD_NAME:-}
+      CLOUDINARY_API_KEY:     ${CLOUDINARY_API_KEY:-}
+      CLOUDINARY_API_SECRET:  ${CLOUDINARY_API_SECRET:-}
+      SMTP_HOST:              ${SMTP_HOST:-}
+      SMTP_PORT:              ${SMTP_PORT:-587}
+      SMTP_USER:              ${SMTP_USER:-}
+      SMTP_PASS:              ${SMTP_PASS:-}
     volumes:
       - uploads_data:/app/server/uploads
+    # APP_PORT controls how the port is exposed on the host:
+    #   HTTP mode  (default) : APP_PORT=8080           → 0.0.0.0:8080
+    #   HTTPS mode (Caddy)   : APP_PORT=127.0.0.1:8080 → loopback only
     ports:
       - "${APP_PORT:-8080}:8080"
 
-  # Optional: Caddy reverse proxy with automatic HTTPS via Let's Encrypt.
-  # Enable by uncommenting and setting DOMAIN in .env.
-  # caddy:
-  #   image: caddy:2-alpine
-  #   container_name: familyapp-caddy
-  #   restart: unless-stopped
-  #   depends_on:
-  #     - app
-  #   ports:
-  #     - "80:80"
-  #     - "443:443"
-  #   volumes:
-  #     - ./Caddyfile:/etc/caddy/Caddyfile:ro
-  #     - caddy_data:/data
-  #     - caddy_config:/config
-  #   environment:
-  #     DOMAIN: ${DOMAIN:?set DOMAIN to your fqdn}
+  # ── Caddy (HTTPS / reverse proxy) ────────────────────────────
+  # Active only when starting with:  docker compose --profile https up -d
+  #
+  # Caddy automatically:
+  #   • Issues and renews a TLS certificate from Let's Encrypt
+  #   • Redirects HTTP → HTTPS
+  #   • Proxies requests (including WebSockets) to the app container
+  #   • Adds security headers (HSTS, X-Frame-Options, …)
+  caddy:
+    profiles: ["https"]
+    image: caddy:2-alpine
+    container_name: familyapp-caddy
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN must be set in .env when using the https profile}
 
 volumes:
   postgres_data:
   uploads_data:
-  # caddy_data:
-  # caddy_config:
+  caddy_data:
+  caddy_config:
