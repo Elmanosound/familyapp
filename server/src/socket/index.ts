@@ -2,6 +2,7 @@ import { Server as HttpServer } from 'http';
 import { Server } from 'socket.io';
 import { verifyAccessToken } from '../utils/jwt.js';
 import { prisma } from '../config/db.js';
+import { logger } from '../config/logger.js';
 
 export function initializeSocket(httpServer: HttpServer) {
   const io = new Server(httpServer, {
@@ -33,7 +34,7 @@ export function initializeSocket(httpServer: HttpServer) {
 
   io.on('connection', (socket) => {
     const user = socket.data.user;
-    console.log(`User connected: ${user.firstName} ${user.lastName}`);
+    logger.info({ userId: user.id }, `User connected: ${user.firstName} ${user.lastName}`);
 
     // Join all family rooms
     for (const fm of user.familyMembers) {
@@ -103,7 +104,7 @@ export function initializeSocket(httpServer: HttpServer) {
     });
 
     socket.on('disconnect', () => {
-      console.log(`User disconnected: ${user.firstName}`);
+      logger.info({ userId: user.id }, `User disconnected: ${user.firstName}`);
     });
   });
 

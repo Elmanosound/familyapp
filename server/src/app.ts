@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import morgan from 'morgan';
+import pinoHttp from 'pino-http';
 import cookieParser from 'cookie-parser';
 import path from 'path';
 import fs from 'fs';
@@ -10,6 +10,7 @@ import routes from './routes/index.js';
 import { errorHandler } from './middleware/error.middleware.js';
 import { idAliasMiddleware } from './middleware/id-alias.middleware.js';
 import { globalLimiter } from './middleware/rate-limit.middleware.js';
+import { logger } from './config/logger.js';
 import { env } from './config/env.js';
 
 // ESM-safe __dirname replacement
@@ -27,13 +28,38 @@ app.set('trust proxy', 1);
 app.use(
   helmet({
     crossOriginResourcePolicy: { policy: 'cross-origin' },
-    // Disable CSP for the SPA — it conflicts with inline scripts injected by Vite preview.
+    // CSP is handled by Caddy (Caddyfile) — disable here to avoid conflicts.
     contentSecurityPolicy: false,
   }),
 );
 app.use(cors({ origin: env.CLIENT_URL, credentials: true }));
 app.use(cookieParser());
-app.use(morgan(env.NODE_ENV === 'production' ? 'combined' : 'dev'));
+
+// Structured JSON HTTP logging via Pino.
+// Health-check requests are silenced — they're noisy and uninteresting.
+// 5xx → error, 4xx → warn, 2xx/3xx → info.
+app.use(
+  pinoHttp({
+    logger,
+    autoLogging: { ignore: (req) => req.url === '/health' },
+    customLogLevel: (_req, res, err) => {
+      if (err || res.statusCode >= 500) return 'error';
+      if (res.statusCode >= 400) return 'warn';
+      return 'info';
+    },
+    // Keep request logs lean — full headers are rarely useful and
+    // may expose sensitive values even with redaction.
+    serializers: {
+      req: (req) => ({
+        method:        req.method,
+        url:           req.url,
+        remoteAddress: req.remoteAddress,
+      }),
+      res: (res) => ({ statusCode: res.statusCode }),
+    },
+  }),
+);
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -70,16 +96,16 @@ if (env.NODE_ENV === 'production') {
     env.CLIENT_DIST_PATH ?? path.resolve(__dirname, '..', '..', 'client');
 
   if (fs.existsSync(path.join(clientDist, 'index.html'))) {
-    console.log(`[app] Serving static client from ${clientDist}`);
+    logger.info({ clientDist }, '[app] Serving static client');
     app.use(express.static(clientDist));
     // SPA fallback: serve index.html for any non-API route so React Router works.
     app.get(/^(?!\/(api|uploads|health)).*/, (_req, res) => {
       res.sendFile(path.join(clientDist, 'index.html'));
     });
   } else {
-    console.warn(
-      `[app] Client index.html not found at ${clientDist}; serving API only. ` +
-        `Set CLIENT_DIST_PATH to override.`,
+    logger.warn(
+      { clientDist },
+      '[app] Client index.html not found — serving API only. Set CLIENT_DIST_PATH to override.',
     );
   }
 }
