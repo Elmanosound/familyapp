@@ -28,8 +28,9 @@ export const useAuthStore = create<AuthState>()(
         set({ isLoading: true });
         try {
           const { data } = await api.post('/auth/login', { email, password });
+          // The server sets the refresh token as an HttpOnly cookie automatically.
+          // We only store the short-lived access token in localStorage.
           localStorage.setItem('accessToken', data.accessToken);
-          localStorage.setItem('refreshToken', data.refreshToken);
           connectSocket(data.accessToken);
           set({ user: data.user, accessToken: data.accessToken, isAuthenticated: true });
         } finally {
@@ -42,7 +43,6 @@ export const useAuthStore = create<AuthState>()(
         try {
           const { data } = await api.post('/auth/register', registerData);
           localStorage.setItem('accessToken', data.accessToken);
-          localStorage.setItem('refreshToken', data.refreshToken);
           connectSocket(data.accessToken);
           set({ user: data.user, accessToken: data.accessToken, isAuthenticated: true });
         } finally {
@@ -51,9 +51,10 @@ export const useAuthStore = create<AuthState>()(
       },
 
       logout: () => {
+        // Calls the server to invalidate the refresh token in the DB and clear
+        // the HttpOnly cookie. Fire-and-forget — we log out locally regardless.
         api.post('/auth/logout').catch(() => {});
         localStorage.removeItem('accessToken');
-        localStorage.removeItem('refreshToken');
         disconnectSocket();
         set({ user: null, accessToken: null, isAuthenticated: false });
       },
@@ -81,6 +82,6 @@ export const useAuthStore = create<AuthState>()(
         accessToken: state.accessToken,
         isAuthenticated: state.isAuthenticated,
       }),
-    }
-  )
+    },
+  ),
 );
