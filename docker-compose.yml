@@ -44,6 +44,11 @@ services:
     # Uncomment for local debugging only:
     # ports:
     #   - "127.0.0.1:5432:5432"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "7"
 
   # ── Application ──────────────────────────────────────────────
   app:
@@ -77,6 +82,11 @@ services:
     #   HTTPS mode (Caddy)   : APP_PORT=127.0.0.1:8080 → loopback only
     ports:
       - "${APP_PORT:-8080}:8080"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "7"
 
   # ── Caddy (HTTPS / reverse proxy) ────────────────────────────
   # Active only when starting with:  docker compose --profile https up -d
@@ -102,6 +112,11 @@ services:
       - caddy_config:/config
     environment:
       DOMAIN: ${DOMAIN:?DOMAIN must be set in .env when using the https profile}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "7"
 
 volumes:
   postgres_data:

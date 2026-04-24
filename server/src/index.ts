@@ -3,6 +3,7 @@ import app from './app.js';
 import { connectDB, disconnectDB } from './config/db.js';
 import { initializeSocket } from './socket/index.js';
 import { env } from './config/env.js';
+import { logger } from './config/logger.js';
 
 async function start() {
   await connectDB();
@@ -11,12 +12,12 @@ async function start() {
   initializeSocket(httpServer);
 
   httpServer.listen(env.PORT, () => {
-    console.log(`Server running on port ${env.PORT} in ${env.NODE_ENV} mode`);
+    logger.info({ port: env.PORT, env: env.NODE_ENV }, 'Server running');
   });
 
   // Graceful shutdown
   const shutdown = async () => {
-    console.log('Shutting down...');
+    logger.info('Shutting down...');
     await disconnectDB();
     process.exit(0);
   };
@@ -24,4 +25,4 @@ async function start() {
   process.on('SIGTERM', shutdown);
 }
 
-start().catch(console.error);
+start().catch((err) => logger.error({ err }, 'Failed to start server'));
