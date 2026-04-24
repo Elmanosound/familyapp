@@ -69,7 +69,9 @@ export function MediaPage() {
   const [media,          setMedia]          = useState<MediaItem[]>([]);
   const [loading,        setLoading]        = useState(false);
   const [uploading,      setUploading]      = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadProgress, setUploadProgress] = useState(0);  // current file %
+  const [uploadCurrent,  setUploadCurrent]  = useState(0);  // index in batch
+  const [uploadTotal,    setUploadTotal]    = useState(0);  // batch size
   const [selectedIndex,  setSelectedIndex]  = useState<number | null>(null);
   const [error,          setError]          = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -118,41 +120,64 @@ export function MediaPage() {
   // ── Upload ───────────────────────────────────────────────────────────────────
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !familyId) return;
-
-    const formData = new FormData();
-    formData.append('file', file);
-    // Upload directly into the current album if one is open
-    if (selectedAlbumId) formData.append('albumId', selectedAlbumId);
+    const files = Array.from(e.target.files ?? []);
+    if (!files.length || !familyId) return;
 
     setUploading(true);
+    setUploadTotal(files.length);
+    setUploadCurrent(0);
     setUploadProgress(0);
     setError(null);
 
-    try {
-      await api.post(`/families/${familyId}/media/upload`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-        timeout: 120_000,
-        onUploadProgress: (evt) => {
-          if (evt.total) setUploadProgress(Math.round((evt.loaded * 100) / evt.total));
-        },
-      });
-      toast.success('Média ajouté !');
-      await Promise.all([fetchMedia(), fetchAlbums()]);
-    } catch (err: unknown) {
-      const msg =
-        err && typeof err === 'object' && 'response' in err
-          ? (err as { response: { data: { message?: string } } }).response?.data?.message
-          : undefined;
-      const label = msg ?? 'Upload échoué';
-      setError(label);
-      toast.error(label);
-    } finally {
-      setUploading(false);
+    let succeeded = 0;
+    let failed    = 0;
+
+    for (let i = 0; i < files.length; i++) {
+      setUploadCurrent(i + 1);
       setUploadProgress(0);
-      if (fileInputRef.current) fileInputRef.current.value = '';
+
+      const formData = new FormData();
+      formData.append('file', files[i]);
+      if (selectedAlbumId) formData.append('albumId', selectedAlbumId);
+
+      try {
+        await api.post(`/families/${familyId}/media/upload`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+          timeout: 120_000,
+          onUploadProgress: (evt) => {
+            if (evt.total) setUploadProgress(Math.round((evt.loaded * 100) / evt.total));
+          },
+        });
+        succeeded++;
+      } catch (err: unknown) {
+        failed++;
+        const msg =
+          err && typeof err === 'object' && 'response' in err
+            ? (err as { response: { data: { message?: string } } }).response?.data?.message
+            : undefined;
+        // Surface first error to the user but keep going with remaining files
+        if (failed === 1) setError(msg ?? `Impossible d'uploader « ${files[i].name} »`);
+      }
     }
+
+    // Refresh once after the whole batch
+    await Promise.all([fetchMedia(), fetchAlbums()]);
+
+    if (failed === 0) {
+      toast.success(
+        files.length === 1 ? 'Média ajouté !' : `${succeeded} médias ajoutés !`
+      );
+    } else if (succeeded > 0) {
+      toast.success(`${succeeded} ajouté${succeeded > 1 ? 's' : ''}, ${failed} échoué${failed > 1 ? 's' : ''}`);
+    } else {
+      toast.error('Tous les uploads ont échoué');
+    }
+
+    setUploading(false);
+    setUploadProgress(0);
+    setUploadCurrent(0);
+    setUploadTotal(0);
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   // ── Albums ────────────────────────────────────────────────────────────────────
@@ -341,6 +366,7 @@ export function MediaPage() {
             ref={fileInputRef}
             type="file"
             accept={ACCEPTED_TYPES}
+            multiple
             className="hidden"
             onChange={handleFileSelect}
           />
@@ -351,7 +377,11 @@ export function MediaPage() {
             isLoading={uploading}
           >
             {!uploading && <Plus className="w-4 h-4 mr-1" />}
-            {uploading ? `${uploadProgress}%` : 'Ajouter'}
+            {uploading
+              ? uploadTotal > 1
+                ? `${uploadCurrent}/${uploadTotal}`
+                : `${uploadProgress}%`
+              : 'Ajouter'}
           </Button>
         </div>
       </div>
@@ -359,14 +389,34 @@ export function MediaPage() {
       {/* ── Upload progress ──────────────────────────────── */}
       {uploading && (
         <div className="mb-4">
+          {/* Overall batch progress (filled segments) */}
+          {uploadTotal > 1 && (
+            <div className="flex gap-1 mb-1.5">
+              {Array.from({ length: uploadTotal }).map((_, i) => (
+                <div
+                  key={i}
+                  className={`flex-1 h-1.5 rounded-full transition-colors ${
+                    i < uploadCurrent - 1
+                      ? 'bg-primary-600'
+                      : i === uploadCurrent - 1
+                      ? 'bg-primary-400'
+                      : 'bg-gray-200 dark:bg-gray-700'
+                  }`}
+                />
+              ))}
+            </div>
+          )}
+          {/* Current-file progress bar */}
           <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
             <div
-              className="bg-primary-600 h-2 rounded-full transition-all duration-300"
+              className="bg-primary-600 h-2 rounded-full transition-all duration-200"
               style={{ width: `${uploadProgress}%` }}
             />
           </div>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            Upload en cours… {uploadProgress}%
+            {uploadTotal > 1
+              ? `Photo ${uploadCurrent}/${uploadTotal} · ${uploadProgress}%`
+              : `Upload en cours… ${uploadProgress}%`}
           </p>
         </div>
       )}
