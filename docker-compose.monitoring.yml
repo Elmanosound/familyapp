@@ -1,0 +1,56 @@
+# ============================================================
+#  FamilyApp — Uptime Kuma monitoring stack
+#
+#  Run this on your NAS (or any always-on machine) so that
+#  Uptime Kuma pings the production server from outside GCP
+#  and alerts you when it goes down.
+#
+#  Usage:
+#    docker compose -f docker-compose.monitoring.yml up -d
+#
+#  Web UI (first start — create your admin account):
+#    http://<nas-ip>:3001
+#
+#  ── What to configure in the UI ───────────────────────────
+#
+#  1. Create a monitor:
+#       Type        : HTTP(s)
+#       Friendly name: FamilyApp — Health
+#       URL         : https://<your-domain>/health
+#       Heartbeat interval: 60 s
+#       Retries     : 3
+#       Expected status code: 200
+#
+#  2. (Optional) Add a notification channel:
+#       Settings → Notifications → Telegram / Email / Gotify …
+#       Attach it to the monitor so you get alerted on downtime.
+#
+#  ── Port customisation ────────────────────────────────────
+#  Set KUMA_PORT in your NAS environment or a .env file placed
+#  next to this file to change the exposed port (default 3001).
+# ============================================================
+
+services:
+
+  uptime-kuma:
+    image: louislam/uptime-kuma:1
+    container_name: uptime-kuma
+    restart: unless-stopped
+    ports:
+      - "${KUMA_PORT:-3001}:3001"
+    volumes:
+      - uptime_kuma_data:/app/data
+    # Give the container a fixed hostname so the web UI URL in
+    # notification links stays stable across restarts.
+    hostname: uptime-kuma
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  uptime_kuma_data:
+    # Named volume — data survives container recreation and upgrades.
+    # To back up: docker run --rm -v uptime_kuma_data:/data -v $(pwd):/out alpine \
+    #   tar czf /out/uptime-kuma-backup.tar.gz -C /data .
