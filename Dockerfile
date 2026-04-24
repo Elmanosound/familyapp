@@ -73,11 +73,16 @@ RUN mkdir -p /app/server/uploads
 VOLUME ["/app/server/uploads"]
 
 WORKDIR /app/server
+
+# Migration-aware entrypoint: detects legacy (db-push) vs fresh databases,
+# baselines if needed, then runs `prisma migrate deploy` before starting.
+COPY server/entrypoint.sh ./entrypoint.sh
+RUN chmod +x ./entrypoint.sh
+
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
   CMD wget -qO- http://localhost:8080/health || exit 1
 
 ENTRYPOINT ["/sbin/tini", "--"]
-# Push the Prisma schema to the database on first boot, then start
-CMD ["sh", "-c", "npx prisma db push --skip-generate --accept-data-loss && node dist/index.js"]
+CMD ["./entrypoint.sh"]
