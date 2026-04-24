@@ -10,7 +10,7 @@
 #  Caddy handles:
 #    - TLS certificate issuance and renewal (automatic)
 #    - HTTP → HTTPS redirect (automatic)
-#    - Security headers (HSTS, X-Frame-Options, …)
+#    - Security headers (HSTS, CSP, X-Frame-Options, …)
 #    - WebSocket proxying for Socket.IO (transparent)
 #    - gzip compression
 # ============================================================
@@ -40,7 +40,6 @@
     encode gzip
 
     # ── Security headers ──────────────────────────────────────
-    # Note: CSP is tracked separately (audit item #12).
     header {
         # Remove server fingerprinting
         -Server
@@ -59,6 +58,30 @@
 
         # Restrict browser features
         Permissions-Policy "geolocation=(self), camera=(self), microphone=()"
+
+        # ── Content-Security-Policy ────────────────────────────
+        #
+        # script-src 'self'         Vite bundles all JS to /assets/*.js —
+        #                           no inline scripts needed in production.
+        #                           Blocks injected <script> tags (XSS).
+        #
+        # style-src 'unsafe-inline' Required for CSS-in-JS and styles
+        #                           injected by UI libraries at runtime.
+        #                           Google Fonts CSS served from its CDN.
+        #
+        # img-src / media-src       'self' for /uploads, Cloudinary for
+        #                           hosted photos & videos, data:/blob:
+        #                           for in-memory previews before upload.
+        #
+        # connect-src 'self'        Covers same-origin API calls and
+        #                           Socket.IO WebSocket (wss://same-domain).
+        #                           Cloudinary API for server-side uploads.
+        #
+        # frame-ancestors 'none'    Blocks all framing (redundant with
+        #                           X-Frame-Options, but CSP takes precedence
+        #                           in modern browsers).
+        #
+        Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://res.cloudinary.com; connect-src 'self' https://api.cloudinary.com; media-src 'self' https://res.cloudinary.com blob:; worker-src blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests;"
     }
 
     # ── Access logs ───────────────────────────────────────────
