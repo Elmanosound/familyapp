@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Send, MessageCircle } from 'lucide-react';
 import { useFamilyStore } from '../stores/familyStore';
 import { useAuthStore } from '../stores/authStore';
+import { useNotificationStore } from '../stores/notificationStore';
 import { Avatar } from '../components/ui/Avatar';
 import { EmptyState } from '../components/ui/EmptyState';
 import { getSocket } from '../config/socket';
@@ -13,11 +14,15 @@ import { clsx } from 'clsx';
 export function ChatPage() {
   const { activeFamily } = useFamilyStore();
   const { user } = useAuthStore();
+  const { reset } = useNotificationStore();
   const [messages, setMessages] = useState<Message[]>([]);
   const [text, setText] = useState('');
   const [typingUser, setTypingUser] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  // Clear the unread badge as soon as the user opens the chat
+  useEffect(() => { reset(); }, [reset]);
 
   const fetchMessages = useCallback(async () => {
     if (!activeFamily) return;

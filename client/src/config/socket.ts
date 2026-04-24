@@ -17,11 +17,11 @@ export function connectSocket(token: string): Socket {
   });
 
   socket.on('connect', () => {
-    console.log('Socket connected');
+    // connected — nothing to log in production
   });
 
-  socket.on('connect_error', (err) => {
-    console.error('Socket connection error:', err.message);
+  socket.on('connect_error', (_err) => {
+    // reconnection handled automatically by socket.io-client
   });
 
   return socket;
