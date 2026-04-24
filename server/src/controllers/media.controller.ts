@@ -92,7 +92,48 @@ export async function uploadFile(req: Request, res: Response, next: NextFunction
       },
     });
 
+    // If the upload is assigned to an album that has no cover yet,
+    // automatically use this image as the cover (skip for videos).
+    if (req.body.albumId && !isVideo) {
+      await prisma.album.updateMany({
+        where: { id: req.body.albumId, coverImageUrl: null },
+        data:  { coverImageUrl: fileUrl },
+      });
+    }
+
     res.status(201).json({ media });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function updateMedia(req: Request, res: Response, next: NextFunction) {
+  try {
+    const mediaId = req.params.mediaId as string;
+
+    const existing = await prisma.media.findFirst({
+      where: { id: mediaId, familyId: req.params.familyId as string },
+    });
+    if (!existing) throw new NotFoundError('Media not found');
+
+    const updated = await prisma.media.update({
+      where: { id: mediaId },
+      data: {
+        ...(req.body.caption  !== undefined && { caption:  req.body.caption  ?? null }),
+        ...(req.body.albumId  !== undefined && { albumId:  req.body.albumId  || null }),
+      },
+      include: {
+        uploadedBy: { select: { id: true, firstName: true, lastName: true } },
+        likes:      { select: { userId: true } },
+        comments: {
+          include: { user: { select: { id: true, firstName: true, lastName: true } } },
+          orderBy:  { createdAt: 'asc' },
+        },
+        _count: { select: { likes: true, comments: true } },
+      },
+    });
+
+    res.json({ media: updated });
   } catch (error) {
     next(error);
   }

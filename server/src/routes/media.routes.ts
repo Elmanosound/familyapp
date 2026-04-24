@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
-  getMedia, uploadMedia, uploadFile, deleteMedia, toggleLike, addComment,
+  getMedia, uploadMedia, uploadFile, updateMedia, deleteMedia,
+  toggleLike, addComment,
   getAlbums, createAlbum, deleteAlbum,
 } from '../controllers/media.controller.js';
 import { protect } from '../middleware/auth.middleware.js';
@@ -14,6 +15,7 @@ router.use(protect, requireFamilyMember);
 router.get('/', getMedia);
 router.post('/upload', uploadSingle, uploadFile);
 router.post('/upload-json', uploadMedia); // keep the JSON-only endpoint
+router.patch('/:mediaId', updateMedia);
 router.delete('/:mediaId', deleteMedia);
 router.post('/:mediaId/like', toggleLike);
 router.post('/:mediaId/comments', addComment);
