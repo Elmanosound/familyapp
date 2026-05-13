@@ -60,15 +60,22 @@ export function LoginPage() {
               placeholder="votre@email.com"
               required
             />
-            <Input
-              id="password"
-              label="Mot de passe"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Votre mot de passe"
-              required
-            />
+            <div>
+              <Input
+                id="password"
+                label="Mot de passe"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Votre mot de passe"
+                required
+              />
+              <div className="text-right mt-1">
+                <Link to="/forgot-password" className="text-sm text-primary-600 hover:underline">
+                  Mot de passe oublié ?
+                </Link>
+              </div>
+            </div>
             <Button type="submit" className="w-full" size="lg" isLoading={isLoading}>
               Se connecter
             </Button>

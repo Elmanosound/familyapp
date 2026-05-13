@@ -15,6 +15,8 @@ import { MealPlanPage } from '../pages/MealPlanPage';
 import { FamilySettingsPage } from '../pages/FamilySettingsPage';
 import { ProfilePage } from '../pages/ProfilePage';
 import { AcceptInvitePage } from '../pages/AcceptInvitePage';
+import { ForgotPasswordPage } from '../pages/ForgotPasswordPage';
+import { ResetPasswordPage } from '../pages/ResetPasswordPage';
 
 export function AppRouter() {
   return (
@@ -25,7 +27,9 @@ export function AppRouter() {
         <Route path="/register" element={<RegisterPage />} />
         {/* Public on purpose — the page handles both signed-in and
             anonymous states and redirects through login/register as needed. */}
-        <Route path="/invite/:token" element={<AcceptInvitePage />} />
+        <Route path="/invite/:token"         element={<AcceptInvitePage />} />
+        <Route path="/forgot-password"        element={<ForgotPasswordPage />} />
+        <Route path="/reset-password"         element={<ResetPasswordPage />} />
 
         {/* Protected routes */}
         <Route

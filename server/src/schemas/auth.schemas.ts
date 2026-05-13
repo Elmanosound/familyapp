@@ -13,6 +13,15 @@ export const LoginSchema = z.object({
   password: z.string().min(1, 'Mot de passe requis'),
 });
 
+export const ForgotPasswordSchema = z.object({
+  email: z.string().email('Email invalide'),
+});
+
+export const ResetPasswordSchema = z.object({
+  token:    z.string().min(1, 'Token requis'),
+  password: z.string().min(8, 'Le mot de passe doit contenir au moins 8 caractères'),
+});
+
 export const UpdateProfileSchema = z
   .object({
     firstName: z.string().min(1).max(50).optional(),
