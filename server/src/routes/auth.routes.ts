@@ -1,9 +1,9 @@
 import { Router } from 'express';
-import { register, login, refresh, logout, getMe, updateProfile } from '../controllers/auth.controller.js';
+import { register, login, refresh, logout, getMe, updateProfile, forgotPassword, resetPassword } from '../controllers/auth.controller.js';
 import { protect } from '../middleware/auth.middleware.js';
 import { loginLimiter, authLimiter } from '../middleware/rate-limit.middleware.js';
 import { validate } from '../middleware/validate.middleware.js';
-import { RegisterSchema, LoginSchema, UpdateProfileSchema } from '../schemas/auth.schemas.js';
+import { RegisterSchema, LoginSchema, UpdateProfileSchema, ForgotPasswordSchema, ResetPasswordSchema } from '../schemas/auth.schemas.js';
 
 const router = Router();
 
@@ -13,5 +13,7 @@ router.post('/refresh',  authLimiter,                                  refresh);
 router.post('/logout',   protect,                                      logout);
 router.get('/me',        protect,                                      getMe);
 router.patch('/profile', protect,      validate(UpdateProfileSchema), updateProfile);
+router.post('/forgot-password',        authLimiter, validate(ForgotPasswordSchema), forgotPassword);
+router.post('/reset-password',         authLimiter, validate(ResetPasswordSchema),  resetPassword);
 
 export default router;
