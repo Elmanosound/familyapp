@@ -29,12 +29,13 @@ export async function sendPasswordResetEmail(to: string, link: string): Promise<
     return;
   }
 
-  await transporter.sendMail({
-    from: `"FamilyApp" <${env.SMTP_USER}>`,
-    to,
-    subject: 'Réinitialisation de votre mot de passe',
-    text: `Bonjour,\n\nCliquez sur le lien ci-dessous pour réinitialiser votre mot de passe (valable 1 heure) :\n\n${link}\n\nSi vous n'avez pas fait cette demande, ignorez cet email.\n\nL'équipe FamilyApp`,
-    html: `
+  try {
+    await transporter.sendMail({
+      from: `"FamilyApp" <${env.SMTP_USER}>`,
+      to,
+      subject: 'Réinitialisation de votre mot de passe',
+      text: `Bonjour,\n\nCliquez sur le lien ci-dessous pour réinitialiser votre mot de passe (valable 1 heure) :\n\n${link}\n\nSi vous n'avez pas fait cette demande, ignorez cet email.\n\nL'équipe FamilyApp`,
+      html: `
       <div style="font-family:sans-serif;max-width:480px;margin:auto;padding:32px;background:#f9fafb;border-radius:12px">
         <h2 style="color:#111827;margin-bottom:8px">Réinitialisation du mot de passe</h2>
         <p style="color:#6b7280;margin-bottom:24px">
@@ -50,7 +51,10 @@ export async function sendPasswordResetEmail(to: string, link: string): Promise<
           votre mot de passe restera inchangé.
         </p>
       </div>`,
-  });
-
-  logger.info({ to }, '[email] Password-reset email sent');
+    });
+    logger.info({ to }, '[email] Password-reset email sent');
+  } catch (err) {
+    // SMTP failure must never cause a 500 — log error + link so admins can act manually
+    logger.error({ err, to, link }, '[email] Failed to send password-reset email — reset link logged');
+  }
 }
