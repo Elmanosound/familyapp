@@ -2,6 +2,7 @@
   "name": "familyapp",
   "version": "1.0.0",
   "private": true,
+  "main": "electron/dist/main.js",
   "workspaces": [
     "shared",
     "server",
@@ -12,9 +13,70 @@
     "dev:server": "npm run dev -w server",
     "dev:client": "npm run dev -w client",
     "build": "npm run build -w shared && npm run build -w server && npm run build -w client",
-    "install:all": "npm install"
+    "install:all": "npm install",
+    "electron:compile": "tsc --project electron/tsconfig.json",
+    "electron:dev": "npm run electron:compile && electron .",
+    "electron:build:linux": "npm run electron:compile && electron-builder --linux"
+  },
+  "build": {
+    "appId": "com.familyapp.nas",
+    "productName": "FamilyApp",
+    "copyright": "Copyright © 2025 FamilyApp",
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "icon": "electron/icons",
+      "category": "Network",
+      "maintainer": "FamilyApp <contact@familyapp.local>",
+      "description": "Organisez votre famille au quotidien"
+    },
+    "deb": {
+      "depends": [
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libuuid1"
+      ]
+    },
+    "directories": {
+      "output": "dist-electron",
+      "buildResources": "electron/icons"
+    },
+    "files": [
+      "electron/dist/**/*",
+      "electron/loading.html",
+      "electron/icons/**/*",
+      "!electron/icons/ICONS.md",
+      "!**/*.ts",
+      "!**/*.map"
+    ],
+    "extraMetadata": {
+      "main": "electron/dist/main.js"
+    }
   },
   "devDependencies": {
-    "concurrently": "^9.1.0"
+    "@types/node": "^22.15.18",
+    "concurrently": "^9.1.0",
+    "electron": "^42.1.0",
+    "electron-builder": "^26.0.12",
+    "typescript": "^5.8.3"
   }
 }
