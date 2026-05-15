@@ -19,3 +19,5 @@ docker-compose.override.yml
 caddy_data/
 caddy_config/
 .vscode/
+electron/dist/
+dist-electron/
