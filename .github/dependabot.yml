@@ -1,0 +1,177 @@
+# ============================================================
+#  Dependabot — Automated dependency updates
+#
+#  Weekly PRs every Monday, covering:
+#   • npm packages for client, server, and root (Electron)
+#   • GitHub Actions
+#
+#  PRs are grouped by category so you get a handful of
+#  well-scoped PRs instead of one per package.
+# ============================================================
+
+version: 2
+
+updates:
+  # ── GitHub Actions ──────────────────────────────────────────
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Paris"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "ci"
+
+  # ── Root (Electron + electron-builder + TypeScript) ─────────
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Paris"
+    labels:
+      - "dependencies"
+      - "electron"
+    commit-message:
+      prefix: "build(electron)"
+    groups:
+      electron-runtime:
+        patterns:
+          - "electron"
+          - "electron-builder"
+      typescript-tooling:
+        patterns:
+          - "typescript"
+          - "@types/*"
+
+  # ── Client (React + Vite + test tooling) ────────────────────
+  - package-ecosystem: "npm"
+    directory: "/client"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Paris"
+    labels:
+      - "dependencies"
+      - "client"
+    commit-message:
+      prefix: "chore(client)"
+    groups:
+      react-ecosystem:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "react-*"
+          - "@types/react*"
+      router:
+        patterns:
+          - "react-router-dom"
+      ui-libraries:
+        patterns:
+          - "lucide-react"
+          - "clsx"
+          - "tailwindcss"
+          - "autoprefixer"
+          - "postcss"
+          - "recharts"
+          - "react-big-calendar"
+          - "@types/react-big-calendar"
+      maps:
+        patterns:
+          - "leaflet"
+          - "react-leaflet"
+          - "@types/leaflet"
+      state-and-network:
+        patterns:
+          - "zustand"
+          - "axios"
+          - "socket.io-client"
+      vite-build:
+        patterns:
+          - "vite"
+          - "@vitejs/*"
+      test-tooling:
+        patterns:
+          - "vitest"
+          - "@vitest/*"
+          - "@testing-library/*"
+          - "jsdom"
+      misc:
+        patterns:
+          - "date-fns"
+          - "react-hot-toast"
+          - "react-dropzone"
+
+  # ── Server (Express + Prisma + utilities) ───────────────────
+  - package-ecosystem: "npm"
+    directory: "/server"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Paris"
+    labels:
+      - "dependencies"
+      - "server"
+    commit-message:
+      prefix: "chore(server)"
+    groups:
+      prisma:
+        patterns:
+          - "prisma"
+          - "@prisma/*"
+      express-core:
+        patterns:
+          - "express"
+          - "express-*"
+          - "cors"
+          - "helmet"
+          - "cookie-parser"
+          - "@types/express"
+          - "@types/cors"
+          - "@types/cookie-parser"
+      auth:
+        patterns:
+          - "jsonwebtoken"
+          - "bcryptjs"
+          - "@types/jsonwebtoken"
+          - "@types/bcryptjs"
+      media:
+        patterns:
+          - "cloudinary"
+          - "multer"
+          - "@types/multer"
+      logging:
+        patterns:
+          - "pino"
+          - "pino-http"
+          - "pino-pretty"
+      email:
+        patterns:
+          - "nodemailer"
+          - "@types/nodemailer"
+      utilities:
+        patterns:
+          - "uuid"
+          - "zod"
+          - "dotenv"
+          - "node-cron"
+          - "@types/uuid"
+          - "@types/node-cron"
+      test-tooling:
+        patterns:
+          - "vitest"
+          - "@vitest/*"
+          - "supertest"
+          - "@types/supertest"
+      runtime:
+        patterns:
+          - "tsx"
+          - "typescript"
+          - "@types/node"
