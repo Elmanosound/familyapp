@@ -7,6 +7,9 @@ const jsonMessage = (msg: string) => ({
   error: msg,
 });
 
+// Skip rate-limiting in the test environment so test suites don't hit limits.
+const skipInTest = () => process.env.NODE_ENV === 'test';
+
 // ── Login — very strict ────────────────────────────────────────────────────
 //
 // 5 failed attempts per IP per 15 min.
@@ -19,6 +22,7 @@ export const loginLimiter = rateLimit({
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   skipSuccessfulRequests: true,
+  skip: skipInTest,
   message: jsonMessage(
     'Trop de tentatives de connexion. Réessayez dans 15 minutes.',
   ),
@@ -34,6 +38,7 @@ export const authLimiter = rateLimit({
   limit: 10,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
+  skip: skipInTest,
   message: jsonMessage('Trop de requêtes. Réessayez dans 15 minutes.'),
 });
 
@@ -47,5 +52,6 @@ export const globalLimiter = rateLimit({
   limit: 200,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
+  skip: skipInTest,
   message: jsonMessage('Trop de requêtes. Réessayez plus tard.'),
 });
