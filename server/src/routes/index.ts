@@ -8,6 +8,7 @@ import mediaRoutes from './media.routes.js';
 import locationRoutes from './location.routes.js';
 import budgetRoutes from './budget.routes.js';
 import mealRoutes from './meal.routes.js';
+import googleRoutes from './google.routes.js';
 
 const router = Router();
 
@@ -20,5 +21,6 @@ router.use('/families/:familyId/media', mediaRoutes);
 router.use('/families/:familyId/location', locationRoutes);
 router.use('/families/:familyId/budget', budgetRoutes);
 router.use('/families/:familyId/meals', mealRoutes);
+router.use('/google', googleRoutes);
 
 export default router;
