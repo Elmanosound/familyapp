@@ -55,6 +55,7 @@ model User {
   mealPlansCreated    MealPlan[]
   invitationsSent     Invitation[]
   familiesCreated     Family[]
+  googleToken         GoogleToken?
 
   @@map("users")
 }
@@ -126,23 +127,40 @@ model Invitation {
   @@map("invitations")
 }
 
+// ─── GOOGLE OAUTH ──────────────────────────────────────────
+
+model GoogleToken {
+  id           String   @id @default(uuid())
+  userId       String   @unique
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken  String
+  refreshToken String
+  expiresAt    DateTime
+  googleEmail  String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("google_tokens")
+}
+
 // ─── CALENDAR ──────────────────────────────────────────────
 
 model CalendarEvent {
-  id          String    @id @default(uuid())
-  familyId    String
-  title       String
-  description String?
-  startDate   DateTime
-  endDate     DateTime
-  allDay      Boolean   @default(false)
-  recurrence  String?   // JSON: {frequency, interval, endDate, daysOfWeek}
-  location    String?
-  color       String?
-  reminders   String?   // JSON: [{type, minutesBefore}]
-  createdById String
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id            String    @id @default(uuid())
+  familyId      String
+  title         String
+  description   String?
+  startDate     DateTime
+  endDate       DateTime
+  allDay        Boolean   @default(false)
+  recurrence    String?   // JSON: {frequency, interval, endDate, daysOfWeek}
+  location      String?
+  color         String?
+  reminders     String?   // JSON: [{type, minutesBefore}]
+  googleEventId String?   // ID of the mirrored Google Calendar event
+  createdById   String
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   family      Family            @relation(fields: [familyId], references: [id], onDelete: Cascade)
   createdBy   User              @relation("EventCreator", fields: [createdById], references: [id])

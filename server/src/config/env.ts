@@ -68,4 +68,10 @@ export const env = {
   // Optional override for the built React client directory.
   // If unset, app.ts derives it from the compiled file location.
   CLIENT_DIST_PATH:       process.env.CLIENT_DIST_PATH || undefined,
+  // ── Google Calendar OAuth (optional) ───────────────────────────────────────
+  // Leave blank to disable Google Calendar integration entirely.
+  GOOGLE_CLIENT_ID:     process.env.GOOGLE_CLIENT_ID     || '',
+  GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET || '',
+  GOOGLE_REDIRECT_URI:  process.env.GOOGLE_REDIRECT_URI
+    || 'http://localhost:5000/api/v1/google/callback',
 };

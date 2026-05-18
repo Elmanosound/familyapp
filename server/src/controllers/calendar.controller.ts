@@ -1,6 +1,13 @@
 import { Request, Response, NextFunction } from 'express';
 import { prisma } from '../config/db.js';
 import { NotFoundError } from '../utils/errors.js';
+import {
+  listGoogleEvents,
+  createGoogleEvent,
+  updateGoogleEvent,
+  deleteGoogleEvent,
+  mapGoogleEvent,
+} from '../services/googleCalendar.service.js';
 
 const userBasicSelect = { id: true, firstName: true, lastName: true, avatarUrl: true };
 
@@ -37,8 +44,8 @@ function expandRecurring(
   rangeEnd: Date,
 ): Array<{ startDate: Date; endDate: Date }> {
   const instances: Array<{ startDate: Date; endDate: Date }> = [];
-  const duration  = template.endDate.getTime() - template.startDate.getTime();
-  const ruleEnd   = rule.endDate ? new Date(rule.endDate) : null;
+  const duration     = template.endDate.getTime() - template.startDate.getTime();
+  const ruleEnd      = rule.endDate ? new Date(rule.endDate) : null;
   const effectiveEnd = ruleEnd && ruleEnd < rangeEnd ? ruleEnd : rangeEnd;
   const MAX = 500; // safety cap
 
@@ -127,9 +134,15 @@ export async function getEvents(req: Request, res: Response, next: NextFunction)
       ...(rangeEnd ? { startDate: { lte: rangeEnd } } : {}),
     };
 
-    const [regularEvents, recurringTemplates] = await Promise.all([
+    // ── Google Calendar events (overlay, parallel to DB query) ────────────
+    const googleFetch = rangeStart && rangeEnd
+      ? listGoogleEvents(req.user!.id, rangeStart, rangeEnd)
+      : Promise.resolve([]);
+
+    const [regularEvents, recurringTemplates, rawGoogleEvents] = await Promise.all([
       prisma.calendarEvent.findMany({ where: regularWhere, include: includeClause, orderBy: { startDate: 'asc' } }),
       prisma.calendarEvent.findMany({ where: recurringWhere, include: includeClause, orderBy: { startDate: 'asc' } }),
+      googleFetch,
     ]);
 
     // ── Map a Prisma row → API response shape ──────────────────────────────
@@ -144,9 +157,11 @@ export async function getEvents(req: Request, res: Response, next: NextFunction)
       endDate:    endOverride   ?? e.endDate,
       assignedTo: assignments.map((a) => a.user),
       recurrence: parseRecurrence(recurrence),
+      source:     'family' as const,
     });
 
-    const result: ReturnType<typeof mapEvent>[] = regularEvents.map((e) => mapEvent(e));
+    const result: (ReturnType<typeof mapEvent> | ReturnType<typeof mapGoogleEvent>)[] =
+      regularEvents.map((e) => mapEvent(e));
 
     // ── Expand recurring templates ─────────────────────────────────────────
     if (rangeStart && rangeEnd) {
@@ -160,6 +175,18 @@ export async function getEvents(req: Request, res: Response, next: NextFunction)
       }
     } else {
       result.push(...recurringTemplates.map((e) => mapEvent(e)));
+    }
+
+    // ── Merge Google events ────────────────────────────────────────────────
+    for (const ge of rawGoogleEvents) {
+      // Skip Google events that are already mirrored as FamilyApp events
+      // (identified by googleEventId stored on the DB record).
+      const alreadyMirrored = result.some(
+        (r) => 'source' in r && r.source === 'family' && (r as { googleEventId?: string }).googleEventId === ge.id,
+      );
+      if (!alreadyMirrored && ge.id) {
+        result.push(mapGoogleEvent(ge));
+      }
     }
 
     result.sort((a, b) =>
@@ -176,13 +203,27 @@ export async function createEvent(req: Request, res: Response, next: NextFunctio
   try {
     const { assignedTo, recurrence, ...eventData } = req.body;
 
+    const startDate = new Date(eventData.startDate);
+    const endDate   = new Date(eventData.endDate);
+
+    // Mirror to Google Calendar (fire-and-forget; never blocks the FamilyApp response)
+    const googleEventId = await createGoogleEvent(req.user!.id, {
+      title:       eventData.title,
+      description: eventData.description,
+      startDate,
+      endDate,
+      allDay:      !!eventData.allDay,
+    });
+
     const event = await prisma.calendarEvent.create({
       data: {
         ...eventData,
-        startDate: new Date(eventData.startDate),
-        endDate:   new Date(eventData.endDate),
-        familyId:  req.params.familyId as string,
+        startDate,
+        endDate,
+        familyId:    req.params.familyId as string,
         createdById: req.user!.id,
+        // Store the Google event ID so updates/deletes stay in sync.
+        ...(googleEventId ? { googleEventId } : {}),
         // Store recurrence as a JSON string (Prisma field is String?)
         ...(recurrence != null ? { recurrence: JSON.stringify(recurrence) } : {}),
         ...(assignedTo?.length && {
@@ -203,6 +244,7 @@ export async function createEvent(req: Request, res: Response, next: NextFunctio
         ...rest,
         assignedTo: assignments.map((a) => a.user),
         recurrence: parseRecurrence(rec),
+        source: 'family',
       },
     });
   } catch (error) {
@@ -237,6 +279,17 @@ export async function updateEvent(req: Request, res: Response, next: NextFunctio
 
     await prisma.calendarEvent.update({ where: { id: eventId }, data: updateData });
 
+    // Mirror update to Google Calendar
+    if (existing.googleEventId) {
+      await updateGoogleEvent(req.user!.id, existing.googleEventId, {
+        title:       updateData.title       ?? existing.title,
+        description: updateData.description ?? existing.description ?? undefined,
+        startDate:   updateData.startDate   ?? existing.startDate,
+        endDate:     updateData.endDate     ?? existing.endDate,
+        allDay:      updateData.allDay      ?? existing.allDay,
+      });
+    }
+
     const event = await prisma.calendarEvent.findUniqueOrThrow({
       where: { id: eventId },
       include: {
@@ -251,6 +304,7 @@ export async function updateEvent(req: Request, res: Response, next: NextFunctio
         ...rest,
         assignedTo: assignments.map((a: { user: unknown }) => a.user),
         recurrence: parseRecurrence(rec),
+        source: 'family',
       },
     });
   } catch (error) {
@@ -265,8 +319,13 @@ export async function deleteEvent(req: Request, res: Response, next: NextFunctio
     });
     if (!event) throw new NotFoundError('Event');
 
+    // Mirror deletion to Google Calendar before removing from DB.
+    if (event.googleEventId) {
+      await deleteGoogleEvent(req.user!.id, event.googleEventId);
+    }
+
     await prisma.calendarEvent.delete({ where: { id: event.id } });
-    res.json({ message: 'Event deleted' });
+    res.json({ message: 'Événement supprimé' });
   } catch (error) {
     next(error);
   }
