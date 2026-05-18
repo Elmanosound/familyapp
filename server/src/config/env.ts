@@ -74,4 +74,10 @@ export const env = {
   GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET || '',
   GOOGLE_REDIRECT_URI:  process.env.GOOGLE_REDIRECT_URI
     || 'http://localhost:5000/api/v1/google/callback',
+  // ── LM Studio chatbot (optional) ────────────────────────────────────────────
+  // URL of the LM Studio server (runs on the same machine as this backend).
+  // Leave blank to disable the chatbot feature entirely.
+  LM_STUDIO_URL:   process.env.LM_STUDIO_URL   || 'http://localhost:1234',
+  // Model ID to use. Leave blank to use whatever LM Studio has loaded.
+  LM_STUDIO_MODEL: process.env.LM_STUDIO_MODEL || '',
 };
