@@ -1,0 +1,24 @@
+[Unit]
+Description=FamilyApp — Daily database and uploads backup
+Documentation=https://github.com/Elmanosound/familyapp
+# Le service principal doit être actif avant de sauvegarder
+After=network.target postgresql.service familyapp.service
+Wants=postgresql.service
+
+[Service]
+Type=oneshot
+# Le script a besoin de root pour lire .env, accéder à pg_dump et écrire les archives
+User=root
+ExecStart=/bin/bash INSTALL_DIR/scripts/backup-nas.sh
+
+# Rediriger stdout/stderr vers le journal systemd
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=familyapp-backup
+
+# Augmenter le timeout pour les grosses bases de données / uploads volumineux
+TimeoutStartSec=1800
+
+# Hardening minimal pour un service oneshot root
+PrivateTmp=true
+NoNewPrivileges=true
