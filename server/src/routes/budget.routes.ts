@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
   getExpenses, createExpense, updateExpense, deleteExpense,
+  uploadReceipt, deleteReceipt,
   getBudgetSummary,
   getGoals, createGoal, updateGoal, deleteGoal, contributeToGoal,
   getEnvelopes, createEnvelope, updateEnvelope, deleteEnvelope,
@@ -11,6 +12,7 @@ import {
 import { protect } from '../middleware/auth.middleware.js';
 import { requireFamilyMember } from '../middleware/family.middleware.js';
 import { validate } from '../middleware/validate.middleware.js';
+import { uploadReceiptSingle } from '../middleware/upload.js';
 import {
   CreateExpenseSchema,  UpdateExpenseSchema,
   CreateGoalSchema,     UpdateGoalSchema,     ContributeGoalSchema,
@@ -24,10 +26,12 @@ const router = Router({ mergeParams: true });
 router.use(protect, requireFamilyMember);
 
 // ── Expenses ──────────────────────────────────────────────────────────────────
-router.get('/expenses',              getExpenses);
-router.post('/expenses',             validate(CreateExpenseSchema), createExpense);
-router.patch('/expenses/:expenseId', validate(UpdateExpenseSchema), updateExpense);
-router.delete('/expenses/:expenseId',                               deleteExpense);
+router.get('/expenses',                          getExpenses);
+router.post('/expenses',                         validate(CreateExpenseSchema), createExpense);
+router.patch('/expenses/:expenseId',             validate(UpdateExpenseSchema), updateExpense);
+router.delete('/expenses/:expenseId',                                            deleteExpense);
+router.post('/expenses/:expenseId/receipt',      uploadReceiptSingle,           uploadReceipt);
+router.delete('/expenses/:expenseId/receipt',                                   deleteReceipt);
 
 // ── Summary ───────────────────────────────────────────────────────────────────
 router.get('/summary', getBudgetSummary);
