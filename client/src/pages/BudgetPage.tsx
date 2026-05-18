@@ -755,8 +755,8 @@ export function BudgetPage() {
                   <XAxis dataKey="label" tick={{ fontSize: 10 }} />
                   <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => `${v}€`} />
                   <Tooltip
-                    formatter={(v: number, name: string) => [
-                      `${v.toFixed(2)} €`,
+                    formatter={(v, name) => [
+                      `${Number(v ?? 0).toFixed(2)} €`,
                       name === 'expenses' ? 'Dépenses' : 'Revenus',
                     ]}
                     cursor={{ fill: 'rgba(139,92,246,0.06)' }}
