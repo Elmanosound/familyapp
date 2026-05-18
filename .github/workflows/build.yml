@@ -60,7 +60,7 @@ jobs:
       #      by GitHub Actions between runs; npm install layer is
       #      virtually instant on subsequent pushes.
       - name: Build and push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           push: true
