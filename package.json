@@ -9,55 +9,30 @@
     "client"
   ],
   "scripts": {
-    "dev": "concurrently \"npm run dev -w server\" \"npm run dev -w client\"",
+    "dev":        "concurrently \"npm run dev -w server\" \"npm run dev -w client\"",
     "dev:server": "npm run dev -w server",
     "dev:client": "npm run dev -w client",
-    "build": "npm run build -w shared && npm run build -w server && npm run build -w client",
+    "build":      "npm run build -w shared && npm run build -w server && npm run build -w client",
     "install:all": "npm install",
-    "electron:compile": "tsc --project electron/tsconfig.json",
-    "electron:dev": "npm run electron:compile && electron .",
-    "electron:build:linux": "npm run electron:compile && electron-builder --linux"
+    "electron:compile":     "tsc --project electron/tsconfig.json",
+    "electron:dev":         "npm run electron:compile && electron .",
+    "electron:build:linux": "npm run electron:compile && electron-builder --linux --x64"
   },
   "build": {
-    "appId": "com.familyapp.nas",
+    "appId":       "com.familyapp.nas",
     "productName": "FamilyApp",
-    "copyright": "Copyright © 2025 FamilyApp",
+    "copyright":   "Copyright © 2025 FamilyApp",
     "linux": {
       "target": [
-        {
-          "target": "AppImage",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        },
-        {
-          "target": "deb",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        }
+        { "target": "AppImage", "arch": ["x64"] }
       ],
-      "icon": "electron/icons",
-      "category": "Network",
-      "maintainer": "FamilyApp <contact@familyapp.local>",
+      "icon":        "electron/icons",
+      "category":    "Network",
+      "maintainer":  "FamilyApp <contact@familyapp.local>",
       "description": "Organisez votre famille au quotidien"
     },
-    "deb": {
-      "depends": [
-        "libgtk-3-0",
-        "libnotify4",
-        "libnss3",
-        "libxss1",
-        "libxtst6",
-        "xdg-utils",
-        "libatspi2.0-0",
-        "libuuid1"
-      ]
-    },
     "directories": {
-      "output": "dist-electron",
+      "output":         "dist-electron",
       "buildResources": "electron/icons"
     },
     "files": [
@@ -73,10 +48,10 @@
     }
   },
   "devDependencies": {
-    "@types/node": "^22.15.18",
-    "concurrently": "^9.1.0",
-    "electron": "^42.1.0",
+    "@types/node":      "^22.15.18",
+    "concurrently":     "^9.1.0",
+    "electron":         "^42.1.0",
     "electron-builder": "^26.0.12",
-    "typescript": "^5.8.3"
+    "typescript":       "^5.8.3"
   }
 }
