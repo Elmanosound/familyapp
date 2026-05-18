@@ -9,6 +9,7 @@ import locationRoutes from './location.routes.js';
 import budgetRoutes from './budget.routes.js';
 import mealRoutes from './meal.routes.js';
 import googleRoutes from './google.routes.js';
+import chatRoutes from './chat.routes.js';
 
 const router = Router();
 
@@ -22,5 +23,6 @@ router.use('/families/:familyId/location', locationRoutes);
 router.use('/families/:familyId/budget', budgetRoutes);
 router.use('/families/:familyId/meals', mealRoutes);
 router.use('/google', googleRoutes);
+router.use('/chat',   chatRoutes);
 
 export default router;

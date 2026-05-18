@@ -2,6 +2,7 @@ import { Outlet } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { BottomNav } from './BottomNav';
 import { Header } from './Header';
+import { ChatBot } from '../chat/ChatBot';
 import { useSocketNotifications } from '../../hooks/useSocketNotifications';
 
 export function AppLayout() {
@@ -17,6 +18,8 @@ export function AppLayout() {
         </main>
       </div>
       <BottomNav />
+      {/* AI chatbot — floating button above the bottom nav */}
+      <ChatBot />
     </div>
   );
 }
