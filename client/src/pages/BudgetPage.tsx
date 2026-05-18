@@ -3,6 +3,7 @@ import {
   Wallet, Plus, TrendingUp, Target, ChevronLeft, ChevronRight,
   Pencil, Trash2, PiggyBank, Package, Search, CheckCircle2,
   AlertTriangle, TrendingDown, Calendar, Repeat, Banknote,
+  Receipt, ChevronDown, X, Upload, Clock,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
@@ -58,6 +59,14 @@ const PERIOD_LABELS: Record<string, string> = {
 const MONTH_NAMES = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun',
   'Jul', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc'];
 
+// Base URL for local media files (/uploads/...)
+const MEDIA_BASE = (import.meta.env.VITE_API_URL || '/api/v1').replace(/\/api\/v1$/, '');
+function getMediaUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  if (url.startsWith('http')) return url;
+  return `${MEDIA_BASE}${url}`;
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function toLocalDate(d: Date) {
@@ -94,7 +103,7 @@ function projectGoalDate(goal: BudgetGoal): string | null {
   const sorted = [...goal.contributions].sort(
     (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
   );
-  const firstDate = new Date(sorted[sorted.length - 1].date);
+  const firstDate = new Date(sorted[0].date);
   const now = new Date();
   const daysActive = Math.max(1, (now.getTime() - firstDate.getTime()) / 86_400_000);
   const dailyRate = goal.currentAmount / daysActive;
@@ -184,6 +193,23 @@ export function BudgetPage() {
   const [recurringModal, setRecurringModal] = useState<{ mode: 'create' | 'edit'; data?: RecurringExpense } | null>(null);
   const [recurringForm, setRecurringForm] = useState(emptyRecurringForm());
   const [payingId, setPayingId] = useState<string | null>(null);
+
+  // Receipt upload (expense modal)
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [receiptBlobUrl, setReceiptBlobUrl] = useState<string | null>(null);
+  const [existingReceipt, setExistingReceipt] = useState<string | null>(null);
+  const [removeExistingReceipt, setRemoveExistingReceipt] = useState(false);
+  const [receiptLightbox, setReceiptLightbox] = useState<string | null>(null);
+
+  // Goal contribution history (expanded/collapsed per goal)
+  const [expandedGoals, setExpandedGoals] = useState<Set<string>>(new Set());
+  const toggleGoalHistory = (goalId: string) =>
+    setExpandedGoals((prev) => {
+      const next = new Set(prev);
+      if (next.has(goalId)) next.delete(goalId);
+      else next.add(goalId);
+      return next;
+    });
 
   // Delete confirm
   const [deleteConfirm, setDeleteConfirm] = useState<{
@@ -291,6 +317,10 @@ export function BudgetPage() {
 
   const openCreateExpense = () => {
     setExpenseForm(emptyExpenseForm());
+    setReceiptFile(null);
+    setReceiptBlobUrl(null);
+    setExistingReceipt(null);
+    setRemoveExistingReceipt(false);
     setExpenseModal({ mode: 'create' });
   };
   const openEditExpense = (exp: Expense) => {
@@ -299,18 +329,39 @@ export function BudgetPage() {
       description: exp.description, date: toLocalDate(new Date(exp.date)),
       isRecurring: exp.isRecurring,
     });
+    setReceiptFile(null);
+    setReceiptBlobUrl(null);
+    setExistingReceipt(exp.receiptUrl ?? null);
+    setRemoveExistingReceipt(false);
     setExpenseModal({ mode: 'edit', data: exp });
   };
   const saveExpense = async () => {
     if (!familyId || !expenseForm.amount || !expenseForm.description) return;
     const payload = { ...expenseForm, amount: parseFloat(expenseForm.amount), date: new Date(expenseForm.date).toISOString() };
     try {
+      let expenseId: string;
       if (expenseModal?.mode === 'edit' && expenseModal.data) {
         await api.patch(`/families/${familyId}/budget/expenses/${expenseModal.data._id}`, payload);
+        expenseId = expenseModal.data._id;
         toast.success('Dépense modifiée');
       } else {
-        await api.post(`/families/${familyId}/budget/expenses`, payload);
+        const { data } = await api.post(`/families/${familyId}/budget/expenses`, payload);
+        expenseId = data.expense._id;
         toast.success('Dépense ajoutée');
+      }
+      // Receipt: remove existing if flagged
+      if (removeExistingReceipt && existingReceipt) {
+        await api.delete(`/families/${familyId}/budget/expenses/${expenseId}/receipt`);
+      }
+      // Receipt: upload new file if selected
+      if (receiptFile) {
+        const form = new FormData();
+        form.append('receipt', receiptFile);
+        await api.post(
+          `/families/${familyId}/budget/expenses/${expenseId}/receipt`,
+          form,
+          { headers: { 'Content-Type': 'multipart/form-data' } },
+        );
       }
       setExpenseModal(null);
       fetchExpenses();
@@ -820,6 +871,15 @@ export function BudgetPage() {
                       Récurrent
                     </span>
                   )}
+                  {exp.receiptUrl && (
+                    <button
+                      onClick={() => setReceiptLightbox(getMediaUrl(exp.receiptUrl))}
+                      className="p-1 text-gray-300 hover:text-budget transition-colors flex-shrink-0"
+                      title="Voir le reçu"
+                    >
+                      <Receipt className="w-4 h-4" />
+                    </button>
+                  )}
                   <span className="font-semibold text-sm whitespace-nowrap">{exp.amount.toFixed(2)} €</span>
                   <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button onClick={() => openEditExpense(exp)} className="p-1 text-gray-400 hover:text-budget">
@@ -1073,9 +1133,37 @@ export function BudgetPage() {
                       </p>
                     )}
                     {goal.contributions.length > 0 && (
-                      <p className="text-xs text-gray-400 mb-3">
-                        {goal.contributions.length} contribution{goal.contributions.length > 1 ? 's' : ''}
-                      </p>
+                      <div className="mb-3">
+                        <button
+                          onClick={() => toggleGoalHistory(goal._id)}
+                          className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                        >
+                          <Clock className="w-3 h-3" />
+                          {goal.contributions.length} contribution{goal.contributions.length > 1 ? 's' : ''}
+                          <ChevronDown className={clsx('w-3 h-3 transition-transform', expandedGoals.has(goal._id) && 'rotate-180')} />
+                        </button>
+                        {expandedGoals.has(goal._id) && (
+                          <div className="mt-2 space-y-2 max-h-44 overflow-y-auto pr-1">
+                            {[...goal.contributions]
+                              .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                              .map((c) => (
+                                <div key={c._id} className="flex items-start gap-2">
+                                  <div className="w-6 h-6 rounded-full bg-budget/10 flex items-center justify-center text-xs font-bold text-budget flex-shrink-0 mt-0.5">
+                                    {c.user.firstName[0].toUpperCase()}
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center justify-between gap-1">
+                                      <span className="text-xs font-medium truncate">{c.user.firstName}</span>
+                                      <span className="text-xs font-semibold text-budget whitespace-nowrap">+{c.amount.toFixed(2)} €</span>
+                                    </div>
+                                    <p className="text-xs text-gray-400">{format(new Date(c.date), 'dd/MM/yyyy')}</p>
+                                    {c.note && <p className="text-xs text-gray-500 italic truncate">{c.note}</p>}
+                                  </div>
+                                </div>
+                              ))}
+                          </div>
+                        )}
+                      </div>
                     )}
                     {!goal.isCompleted && (
                       <Button size="sm" variant="secondary" onClick={() => openContribute(goal)} className="w-full">
@@ -1268,6 +1356,73 @@ export function BudgetPage() {
             onChange={(e) => setExpenseForm((f) => ({ ...f, description: e.target.value }))}
             required
           />
+          {/* Receipt upload */}
+          <div>
+            <label className="block text-sm font-medium mb-1">Reçu (optionnel)</label>
+            {/* Existing receipt in edit mode */}
+            {existingReceipt && !removeExistingReceipt && (
+              <div className="flex items-center gap-2 mb-2 p-2 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                {existingReceipt.match(/\.pdf$/i) ? (
+                  <Receipt className="w-8 h-8 text-gray-400 flex-shrink-0" />
+                ) : (
+                  <img
+                    src={getMediaUrl(existingReceipt) ?? ''}
+                    alt="Reçu"
+                    className="w-12 h-12 object-cover rounded flex-shrink-0"
+                  />
+                )}
+                <span className="text-xs text-gray-500 flex-1 truncate">Reçu existant</span>
+                <button
+                  type="button"
+                  onClick={() => setRemoveExistingReceipt(true)}
+                  className="p-1 text-gray-400 hover:text-red-500 transition-colors"
+                  title="Supprimer le reçu"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+            {/* New file preview */}
+            {receiptBlobUrl && (
+              <div className="flex items-center gap-2 mb-2 p-2 bg-budget/5 rounded-lg">
+                {receiptFile?.type === 'application/pdf' ? (
+                  <Receipt className="w-8 h-8 text-budget flex-shrink-0" />
+                ) : (
+                  <img src={receiptBlobUrl} alt="Nouveau reçu" className="w-12 h-12 object-cover rounded flex-shrink-0" />
+                )}
+                <span className="text-xs text-gray-500 flex-1 truncate">{receiptFile?.name}</span>
+                <button
+                  type="button"
+                  onClick={() => { setReceiptFile(null); setReceiptBlobUrl(null); }}
+                  className="p-1 text-gray-400 hover:text-red-500 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+            {/* Upload zone (shown when no new file is pending) */}
+            {!receiptBlobUrl && (
+              <label className="flex items-center gap-2 cursor-pointer p-3 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-lg hover:border-budget transition-colors">
+                <Upload className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                <span className="text-sm text-gray-400">
+                  {existingReceipt && !removeExistingReceipt ? 'Remplacer le reçu' : 'Joindre un reçu'}
+                </span>
+                <input
+                  type="file"
+                  accept="image/*,application/pdf"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    setReceiptFile(file);
+                    setReceiptBlobUrl(URL.createObjectURL(file));
+                    setRemoveExistingReceipt(false);
+                    e.target.value = '';
+                  }}
+                />
+              </label>
+            )}
+          </div>
           <Input
             label="Date" type="date"
             value={expenseForm.date}
@@ -1609,6 +1764,34 @@ export function BudgetPage() {
             {recurringModal?.mode === 'edit' ? 'Enregistrer' : 'Créer'}
           </Button>
         </div>
+      </Modal>
+
+      {/* Receipt lightbox */}
+      <Modal
+        isOpen={!!receiptLightbox}
+        onClose={() => setReceiptLightbox(null)}
+        title="Reçu"
+      >
+        {receiptLightbox && (
+          <div className="flex justify-center">
+            {receiptLightbox.endsWith('.pdf') ? (
+              <a
+                href={receiptLightbox}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 px-4 py-2 bg-budget text-white rounded-lg hover:bg-budget/90"
+              >
+                <Receipt className="w-4 h-4" /> Ouvrir le PDF
+              </a>
+            ) : (
+              <img
+                src={receiptLightbox}
+                alt="Reçu"
+                className="max-w-full max-h-[70vh] object-contain rounded-lg"
+              />
+            )}
+          </div>
+        )}
       </Modal>
 
       {/* Delete confirm modal */}

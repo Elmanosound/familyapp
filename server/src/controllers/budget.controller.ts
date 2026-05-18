@@ -1,4 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
+import fs from 'fs';
+import path from 'path';
 import { prisma } from '../config/db.js';
 import { NotFoundError, ValidationError } from '../utils/errors.js';
 
@@ -103,8 +105,75 @@ export async function updateExpense(req: Request, res: Response, next: NextFunct
 
 export async function deleteExpense(req: Request, res: Response, next: NextFunction) {
   try {
+    const expense = await prisma.expense.findUnique({ where: { id: req.params.expenseId as string } });
+    if (expense?.receiptUrl?.startsWith('/uploads/')) {
+      const filePath = path.resolve(process.cwd(), expense.receiptUrl.slice(1));
+      try { fs.unlinkSync(filePath); } catch { /* file already gone */ }
+    }
     await prisma.expense.delete({ where: { id: req.params.expenseId as string } });
     res.json({ message: 'Expense deleted' });
+  } catch (error) {
+    next(error);
+  }
+}
+
+// ─── Receipt upload / delete ────────────────────────────────────────────────
+
+export async function uploadReceipt(req: Request, res: Response, next: NextFunction) {
+  try {
+    if (!req.file) {
+      res.status(400).json({ message: 'Aucun fichier reçu' });
+      return;
+    }
+    const expenseId = req.params.expenseId as string;
+    const expense = await prisma.expense.findFirst({
+      where: { id: expenseId, familyId: req.params.familyId as string },
+    });
+    if (!expense) throw new NotFoundError('Expense');
+
+    // Delete previous receipt file if it was a local upload
+    if (expense.receiptUrl?.startsWith('/uploads/')) {
+      const oldPath = path.resolve(process.cwd(), expense.receiptUrl.slice(1));
+      try { fs.unlinkSync(oldPath); } catch { /* ignore */ }
+    }
+
+    const receiptUrl = `/uploads/receipts/${req.file.filename}`;
+    const updated = await prisma.expense.update({
+      where: { id: expenseId },
+      data: { receiptUrl },
+      include: {
+        paidBy: { select: { id: true, firstName: true, lastName: true } },
+        splits: { select: { userId: true } },
+      },
+    });
+    res.json({ expense: updated });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function deleteReceipt(req: Request, res: Response, next: NextFunction) {
+  try {
+    const expenseId = req.params.expenseId as string;
+    const expense = await prisma.expense.findFirst({
+      where: { id: expenseId, familyId: req.params.familyId as string },
+    });
+    if (!expense) throw new NotFoundError('Expense');
+
+    if (expense.receiptUrl?.startsWith('/uploads/')) {
+      const filePath = path.resolve(process.cwd(), expense.receiptUrl.slice(1));
+      try { fs.unlinkSync(filePath); } catch { /* ignore */ }
+    }
+
+    const updated = await prisma.expense.update({
+      where: { id: expenseId },
+      data: { receiptUrl: null },
+      include: {
+        paidBy: { select: { id: true, firstName: true, lastName: true } },
+        splits: { select: { userId: true } },
+      },
+    });
+    res.json({ expense: updated });
   } catch (error) {
     next(error);
   }
