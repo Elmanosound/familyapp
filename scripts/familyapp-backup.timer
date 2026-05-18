@@ -1,0 +1,17 @@
+[Unit]
+Description=FamilyApp — Daily backup timer (03:00)
+Documentation=https://github.com/Elmanosound/familyapp
+Requires=familyapp-backup.service
+
+[Timer]
+# Déclenche la sauvegarde tous les jours à 03:00
+OnCalendar=*-*-* 03:00:00
+
+# Si le NAS était éteint à 03:00, rattraper la sauvegarde manquée au prochain démarrage
+Persistent=true
+
+# Délai aléatoire jusqu'à 5 min pour éviter les pics si plusieurs NAS partagent ce timer
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

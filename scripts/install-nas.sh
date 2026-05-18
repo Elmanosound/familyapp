@@ -26,6 +26,8 @@ banner(){ echo -e "\n${BLUE}${BOLD}$*${NC}"; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="$(dirname "$SCRIPT_DIR")"
 SERVICE_FILE="/etc/systemd/system/familyapp.service"
+BACKUP_SERVICE_FILE="/etc/systemd/system/familyapp-backup.service"
+BACKUP_TIMER_FILE="/etc/systemd/system/familyapp-backup.timer"
 
 # ── Vérifications préliminaires ───────────────────────────────────────────────
 banner "═══════════════════════════════════════════"
@@ -66,7 +68,7 @@ fi
 log ".env valide"
 
 # ── 2. Node.js 20 ─────────────────────────────────────────────────────────────
-step "2/7 — Node.js 20"
+step "2/7 — Node.js 22"
 
 install_node() {
   warn "Installation de Node.js 22 via NodeSource…"
@@ -175,6 +177,19 @@ for i in {1..15}; do
   sleep 1
 done
 
+# ── Timer de sauvegarde automatique ──────────────────────────────────────────
+sed -e "s|INSTALL_DIR|$INSTALL_DIR|g" \
+    "$SCRIPT_DIR/familyapp-backup.service" > "$BACKUP_SERVICE_FILE"
+
+cp "$SCRIPT_DIR/familyapp-backup.timer" "$BACKUP_TIMER_FILE"
+chmod +x "$SCRIPT_DIR/backup-nas.sh"
+
+systemctl daemon-reload
+systemctl enable familyapp-backup.timer
+systemctl start  familyapp-backup.timer
+log "Timer de sauvegarde activé (quotidien à 03:00) — prochain déclenchement :"
+systemctl list-timers familyapp-backup.timer --no-pager 2>/dev/null | tail -1 || true
+
 # ── 7. Application Electron desktop ───────────────────────────────────────────
 step "7/7 — Build et installation de l'application desktop"
 
@@ -256,10 +271,13 @@ echo -e "  ${BOLD}App desktop :${NC}   Cherchez « FamilyApp » dans le lanceur 
 echo -e "  ${BOLD}Interface web :${NC}  http://localhost:$(grep '^PORT=' "$INSTALL_DIR/.env" | cut -d= -f2 || echo 5000)"
 echo ""
 echo -e "  ${BOLD}Commandes utiles :${NC}"
-echo -e "    sudo systemctl status  familyapp   # état du service"
-echo -e "    sudo systemctl restart familyapp   # redémarrer"
-echo -e "    sudo journalctl -u familyapp -f    # logs en direct"
+echo -e "    sudo systemctl status  familyapp              # état du service"
+echo -e "    sudo systemctl restart familyapp              # redémarrer"
+echo -e "    sudo journalctl -u familyapp -f               # logs en direct"
+echo -e "    sudo bash scripts/backup-nas.sh               # sauvegarde manuelle"
+echo -e "    sudo systemctl list-timers familyapp-backup   # prochaine sauvegarde auto"
+echo -e "    ls -lh $INSTALL_DIR/backups/                  # lister les sauvegardes"
 echo ""
 echo -e "  ${BOLD}Mise à jour :${NC}"
-echo -e "    cd $INSTALL_DIR && git pull && sudo bash scripts/install-nas.sh"
+echo -e "    cd $INSTALL_DIR && sudo bash scripts/update-nas.sh"
 echo ""
