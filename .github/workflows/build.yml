@@ -48,7 +48,7 @@ jobs:
       # ── 4. Compute image tags ──────────────────────────────────
       - name: Compute tags
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.IMAGE }}
           tags: |
