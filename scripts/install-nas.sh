@@ -146,7 +146,7 @@ log "Build server + client terminé"
 step "5/7 — Migrations de la base de données"
 
 cd "$INSTALL_DIR"
-sudo -u "$APP_USER" env "$(grep -v '^#' .env | xargs)" npx prisma migrate deploy --schema=server/prisma/schema.prisma
+sudo -u "$APP_USER" env "$(grep -v '^#' .env | xargs)" "$INSTALL_DIR/node_modules/.bin/prisma" migrate deploy --schema=server/prisma/schema.prisma
 log "Migrations appliquées"
 
 # ── 6. Service systemd ─────────────────────────────────────────────────────────
