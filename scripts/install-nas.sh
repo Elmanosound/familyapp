@@ -59,8 +59,8 @@ if [[ ! -f "$INSTALL_DIR/.env" ]]; then
   fi
 fi
 
-# Vérifier que les secrets ont bien été définis
-if grep -qE "CHANGE_ME" "$INSTALL_DIR/.env"; then
+# Vérifier que les secrets ont bien été définis (ignorer les lignes de commentaires)
+if grep -vE "^\s*#" "$INSTALL_DIR/.env" | grep -qE "CHANGE_ME"; then
   error "Le fichier .env contient encore des valeurs CHANGE_ME.\n  → Éditez $INSTALL_DIR/.env avant de continuer."
 fi
 log ".env valide"
@@ -69,15 +69,15 @@ log ".env valide"
 step "2/7 — Node.js 20"
 
 install_node() {
-  warn "Installation de Node.js 20 via NodeSource…"
-  curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+  warn "Installation de Node.js 22 via NodeSource…"
+  curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
   apt-get install -y nodejs
 }
 
 if command -v node &>/dev/null; then
   NODE_MAJOR=$(node --version | sed 's/v//' | cut -d. -f1)
-  if [[ "$NODE_MAJOR" -lt 20 ]]; then
-    warn "Node.js $NODE_MAJOR détecté — mise à jour vers Node.js 20 requise"
+  if [[ "$NODE_MAJOR" -lt 22 ]]; then
+    warn "Node.js $NODE_MAJOR détecté — mise à jour vers Node.js 22 requise (Electron 42+)"
     install_node
   else
     log "Node.js $(node --version) ✓"
@@ -123,8 +123,17 @@ else
   log "Base de données '$DB_NAME' existante ✓"
 fi
 
+# PostgreSQL 15+ : accorder les droits sur le schéma public (requis pour Prisma)
+su -c "psql -d $DB_NAME -c \"GRANT ALL ON SCHEMA public TO $DB_USER\"" postgres
+su -c "psql -d $DB_NAME -c \"GRANT ALL PRIVILEGES ON DATABASE $DB_NAME TO $DB_USER\"" postgres
+log "Droits schéma public accordés à '$DB_USER'"
+
 # ── 4. Dépendances & build ─────────────────────────────────────────────────────
 step "4/7 — Installation des dépendances et build"
+
+# S'assurer que l'utilisateur applicatif possède le répertoire
+# (cas où le clone a été fait avec sudo)
+chown -R "$APP_USER:$APP_USER" "$INSTALL_DIR"
 
 cd "$INSTALL_DIR"
 sudo -u "$APP_USER" npm install
@@ -168,6 +177,12 @@ done
 
 # ── 7. Application Electron desktop ───────────────────────────────────────────
 step "7/7 — Build et installation de l'application desktop"
+
+# ImageMagick est requis pour convertir l'icône SVG → PNG
+if ! command -v convert &>/dev/null; then
+  warn "Installation d'ImageMagick pour la génération des icônes…"
+  apt-get install -y imagemagick
+fi
 
 # Convertir l'icône SVG en PNG si ImageMagick est disponible
 SVG="$INSTALL_DIR/electron/icons/icon.svg"
