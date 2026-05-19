@@ -1,14 +1,23 @@
 /**
  * FamilyBot — floating AI chatbot powered by LM Studio.
  *
- * A 💬 button sits above the bottom navigation bar on mobile and at the
- * bottom-right corner on desktop. Clicking it opens a chat panel that streams
- * responses from the local LM Studio instance via the /api/v1/chat/stream
- * SSE endpoint.
+ * Features:
+ *  - Markdown rendering (react-markdown + remark-gfm): bold, italic, code
+ *    blocks, lists, blockquotes, inline code, links.
+ *  - Stop button: AbortController lets the user interrupt a streaming reply.
+ *  - Starter suggestions: 4 one-click prompts shown in the empty state.
+ *  - Persistence: conversation saved to localStorage and restored on reload.
+ *  - Copy button: hover any bubble to copy its content to clipboard.
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Bot, X, Send, Loader2, Wifi, WifiOff, Trash2 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import {
+  Bot, X, Send, Loader2,
+  Wifi, WifiOff, Trash2,
+  Copy, Check,
+} from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -21,19 +30,52 @@ interface Message {
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const BASE_URL = (import.meta.env.VITE_API_URL as string | undefined) || '/api/v1';
+const LS_KEY   = 'familybot-messages';
+
+const SUGGESTIONS = [
+  'Quelle activité faire en famille ce week-end ?',
+  'Donne-moi une recette rapide et simple pour ce soir',
+  'Comment mieux organiser nos journées ?',
+  'Raconte-moi une blague sympa 😄',
+];
+
+// ── Stop button icon ──────────────────────────────────────────────────────────
+
+function StopSquare() {
+  return <div className="w-3.5 h-3.5 rounded-sm bg-white" />;
+}
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function ChatBot() {
+  // Restore messages from localStorage on mount
+  const [messages, setMessages] = useState<Message[]>(() => {
+    try {
+      const raw = localStorage.getItem(LS_KEY);
+      return raw ? (JSON.parse(raw) as Message[]) : [];
+    } catch {
+      return [];
+    }
+  });
+
   const [isOpen,      setIsOpen]      = useState(false);
-  const [messages,    setMessages]    = useState<Message[]>([]);
   const [input,       setInput]       = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [status,      setStatus]      = useState<'unknown' | 'online' | 'offline'>('unknown');
   const [modelName,   setModelName]   = useState('');
+  const [copiedIdx,   setCopiedIdx]   = useState<number | null>(null);
 
-  const bottomRef  = useRef<HTMLDivElement>(null);
-  const inputRef   = useRef<HTMLTextAreaElement>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const inputRef  = useRef<HTMLTextAreaElement>(null);
+  const abortRef  = useRef<AbortController | null>(null);
+
+  // ── Persist messages (skip error bubbles) ─────────────────────────────────
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LS_KEY, JSON.stringify(messages.filter(m => !m.isError)));
+    } catch { /* storage quota exceeded */ }
+  }, [messages]);
 
   // ── Status check ──────────────────────────────────────────────────────────
 
@@ -52,22 +94,19 @@ export function ChatBot() {
     }
   }, []);
 
-  // Check status the first time the panel opens.
   useEffect(() => {
     if (isOpen && status === 'unknown') checkStatus();
   }, [isOpen, status, checkStatus]);
 
-  // Focus textarea when the panel becomes visible.
   useEffect(() => {
     if (isOpen) setTimeout(() => inputRef.current?.focus(), 120);
   }, [isOpen]);
 
-  // Auto-scroll to newest message.
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // ── Auto-resize textarea ──────────────────────────────────────────────────
+  // ── Textarea auto-resize ──────────────────────────────────────────────────
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInput(e.target.value);
@@ -76,26 +115,30 @@ export function ChatBot() {
     el.style.height = `${Math.min(el.scrollHeight, 80)}px`;
   };
 
-  // ── Send message ──────────────────────────────────────────────────────────
+  // ── Stop streaming ────────────────────────────────────────────────────────
 
-  const sendMessage = useCallback(async () => {
-    const content = input.trim();
+  const stopStreaming = () => abortRef.current?.abort();
+
+  // ── Send / stream ──────────────────────────────────────────────────────────
+
+  const sendMessage = useCallback(async (override?: string) => {
+    const content = (override ?? input).trim();
     if (!content || isStreaming) return;
 
     const userMsg:      Message = { role: 'user',      content };
     const assistantMsg: Message = { role: 'assistant', content: '' };
 
-    setMessages((prev) => [...prev, userMsg, assistantMsg]);
+    setMessages(prev => [...prev, userMsg, assistantMsg]);
     setInput('');
-
-    // Reset textarea height
     if (inputRef.current) inputRef.current.style.height = 'auto';
-
     setIsStreaming(true);
 
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     try {
-      const token  = localStorage.getItem('accessToken');
-      const history: Message[] = [...messages, userMsg];
+      const token   = localStorage.getItem('accessToken');
+      const history = [...messages, userMsg];
 
       const response = await fetch(`${BASE_URL}/chat/stream`, {
         method:  'POST',
@@ -103,14 +146,13 @@ export function ChatBot() {
           'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({
+        body:   JSON.stringify({
           messages: history.map(({ role, content: c }) => ({ role, content: c })),
         }),
+        signal: controller.signal,
       });
 
-      if (!response.ok || !response.body) {
-        throw new Error(`HTTP ${response.status}`);
-      }
+      if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`);
 
       const reader  = response.body.getReader();
       const decoder = new TextDecoder();
@@ -134,7 +176,7 @@ export function ChatBot() {
             };
 
             if (data.error) {
-              setMessages((prev) => [
+              setMessages(prev => [
                 ...prev.slice(0, -1),
                 { role: 'assistant', content: data.error!, isError: true },
               ]);
@@ -142,7 +184,7 @@ export function ChatBot() {
             }
             if (data.done) break outer;
             if (data.content) {
-              setMessages((prev) => {
+              setMessages(prev => {
                 const last = prev[prev.length - 1];
                 return [
                   ...prev.slice(0, -1),
@@ -150,16 +192,28 @@ export function ChatBot() {
                 ];
               });
             }
-          } catch { /* ignore malformed SSE lines */ }
+          } catch { /* malformed SSE line */ }
         }
       }
-    } catch {
-      setMessages((prev) => [
-        ...prev.slice(0, -1),
-        { role: 'assistant', content: 'Impossible de contacter LM Studio.', isError: true },
-      ]);
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        // Keep whatever was already streamed; mark empty replies
+        setMessages(prev => {
+          const last = prev[prev.length - 1];
+          if (last.role === 'assistant' && !last.content) {
+            return [...prev.slice(0, -1), { ...last, content: '*(réponse interrompue)*' }];
+          }
+          return prev;
+        });
+      } else {
+        setMessages(prev => [
+          ...prev.slice(0, -1),
+          { role: 'assistant', content: 'Impossible de contacter LM Studio.', isError: true },
+        ]);
+      }
     } finally {
       setIsStreaming(false);
+      abortRef.current = null;
       setTimeout(() => inputRef.current?.focus(), 50);
     }
   }, [input, isStreaming, messages]);
@@ -171,12 +225,29 @@ export function ChatBot() {
     }
   };
 
+  // ── Copy to clipboard ─────────────────────────────────────────────────────
+
+  const copyMessage = async (content: string, idx: number) => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopiedIdx(idx);
+      setTimeout(() => setCopiedIdx(null), 1500);
+    } catch { /* clipboard not available */ }
+  };
+
+  // ── Clear conversation ────────────────────────────────────────────────────
+
+  const clearMessages = () => {
+    setMessages([]);
+    localStorage.removeItem(LS_KEY);
+  };
+
   // ── Typing indicator (three bouncing dots) ────────────────────────────────
 
   function TypingDots() {
     return (
       <span className="inline-flex items-center gap-0.5 py-0.5">
-        {[0, 150, 300].map((delay) => (
+        {[0, 150, 300].map(delay => (
           <span
             key={delay}
             className="w-1.5 h-1.5 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce"
@@ -186,6 +257,55 @@ export function ChatBot() {
       </span>
     );
   }
+
+  // ── Markdown component overrides ──────────────────────────────────────────
+
+  const mdComponents: React.ComponentProps<typeof ReactMarkdown>['components'] = {
+    pre({ children }) {
+      return (
+        <pre className="bg-gray-900 dark:bg-black rounded-lg p-3 overflow-x-auto my-2 text-xs">
+          {children}
+        </pre>
+      );
+    },
+    code({ className, children }) {
+      const isBlock = !!className?.startsWith('language-');
+      return isBlock ? (
+        <code className="text-green-400 font-mono whitespace-pre">{children}</code>
+      ) : (
+        <code className="bg-gray-200 dark:bg-gray-600 px-1 py-0.5 rounded text-xs font-mono">
+          {children}
+        </code>
+      );
+    },
+    p({ children })  { return <p className="mb-2 last:mb-0">{children}</p>; },
+    ul({ children }) { return <ul className="list-disc list-inside mb-2 space-y-0.5 pl-1">{children}</ul>; },
+    ol({ children }) { return <ol className="list-decimal list-inside mb-2 space-y-0.5 pl-1">{children}</ol>; },
+    h1({ children }) { return <h1 className="font-bold text-base mb-1 mt-2">{children}</h1>; },
+    h2({ children }) { return <h2 className="font-bold mb-1 mt-2">{children}</h2>; },
+    h3({ children }) { return <h3 className="font-semibold mb-1 mt-1">{children}</h3>; },
+    blockquote({ children }) {
+      return (
+        <blockquote className="border-l-2 border-primary-400 pl-3 italic opacity-75 my-1">
+          {children}
+        </blockquote>
+      );
+    },
+    a({ href, children }) {
+      return (
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline text-primary-500 dark:text-primary-400 hover:opacity-80"
+        >
+          {children}
+        </a>
+      );
+    },
+    strong({ children }) { return <strong className="font-semibold">{children}</strong>; },
+    em({ children })     { return <em className="italic">{children}</em>; },
+  };
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -206,20 +326,18 @@ export function ChatBot() {
             bg-white dark:bg-gray-800
             border border-gray-200 dark:border-gray-700
           "
-          style={{ maxHeight: 'min(440px, calc(100dvh - 9rem))' }}
+          style={{ maxHeight: 'min(520px, calc(100dvh - 9rem))' }}
         >
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 bg-primary-600 text-white shrink-0">
             <div className="flex items-center gap-2 min-w-0">
               <Bot className="w-4 h-4 shrink-0" />
               <span className="font-semibold text-sm">FamilyBot</span>
-              {/* Status badge */}
+
               {status === 'online' && (
                 <span className="flex items-center gap-1 text-[11px] text-green-200 min-w-0">
                   <Wifi className="w-3 h-3 shrink-0" />
-                  <span className="truncate max-w-[100px]">
-                    {modelName || 'en ligne'}
-                  </span>
+                  <span className="truncate max-w-[100px]">{modelName || 'en ligne'}</span>
                 </span>
               )}
               {status === 'offline' && (
@@ -235,7 +353,7 @@ export function ChatBot() {
             <div className="flex items-center gap-2 shrink-0">
               {messages.length > 0 && !isStreaming && (
                 <button
-                  onClick={() => setMessages([])}
+                  onClick={clearMessages}
                   className="text-primary-200 hover:text-white transition"
                   title="Effacer la conversation"
                 >
@@ -255,20 +373,47 @@ export function ChatBot() {
           {/* Messages */}
           <div className="flex-1 overflow-y-auto p-3 space-y-3 overscroll-contain">
             {messages.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full text-center text-gray-400 dark:text-gray-500 py-8 gap-2">
-                <Bot className="w-10 h-10 opacity-25" />
-                <p className="text-sm font-medium">Posez-moi une question !</p>
+
+              /* ── Empty state with suggestions ── */
+              <div className="flex flex-col items-center py-6 gap-3">
+                <Bot className="w-10 h-10 opacity-20 text-gray-400 dark:text-gray-500" />
+                <p className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                  Posez-moi une question !
+                </p>
                 {status === 'offline' && (
-                  <p className="text-xs text-red-400 mt-1 max-w-[200px]">
+                  <p className="text-xs text-red-400 text-center max-w-[200px]">
                     LM Studio semble hors ligne.<br />
                     Démarrez-le sur le NAS pour commencer.
                   </p>
                 )}
+                <div className="flex flex-col gap-1.5 w-full mt-1">
+                  {SUGGESTIONS.map(s => (
+                    <button
+                      key={s}
+                      onClick={() => sendMessage(s)}
+                      disabled={status !== 'online'}
+                      className="
+                        text-left text-xs px-3 py-2 rounded-xl
+                        border border-gray-200 dark:border-gray-600
+                        bg-gray-50 dark:bg-gray-700/50
+                        text-gray-600 dark:text-gray-300
+                        hover:bg-primary-50 dark:hover:bg-primary-900/20
+                        hover:border-primary-300 dark:hover:border-primary-700
+                        hover:text-primary-700 dark:hover:text-primary-300
+                        disabled:opacity-40 disabled:cursor-not-allowed
+                        transition-all
+                      "
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
               </div>
+
             ) : (
               messages.map((msg, i) => {
-                const isLast    = i === messages.length - 1;
-                const isTyping  = isLast && msg.role === 'assistant' && !msg.content && isStreaming;
+                const isLast   = i === messages.length - 1;
+                const isTyping = isLast && msg.role === 'assistant' && !msg.content && isStreaming;
 
                 return (
                   <div
@@ -282,21 +427,50 @@ export function ChatBot() {
                       </div>
                     )}
 
-                    {/* Bubble */}
-                    <div
-                      className={`max-w-[78%] px-3 py-2 rounded-2xl text-sm leading-relaxed ${
-                        msg.role === 'user'
-                          ? 'bg-primary-600 text-white rounded-br-sm'
-                          : msg.isError
-                            ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 rounded-bl-sm'
-                            : 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-bl-sm'
-                      }`}
-                    >
-                      {isTyping ? <TypingDots /> : (
-                        // Preserve newlines from the model output
-                        <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                          {msg.content}
-                        </span>
+                    {/* Bubble + copy button */}
+                    <div className="group max-w-[78%] flex flex-col">
+                      <div
+                        className={`px-3 py-2 rounded-2xl text-sm leading-relaxed ${
+                          msg.role === 'user'
+                            ? 'bg-primary-600 text-white rounded-br-sm'
+                            : msg.isError
+                              ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800 rounded-bl-sm'
+                              : 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-bl-sm'
+                        }`}
+                      >
+                        {isTyping ? (
+                          <TypingDots />
+                        ) : msg.role === 'user' ? (
+                          <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                            {msg.content}
+                          </span>
+                        ) : (
+                          <ReactMarkdown
+                            remarkPlugins={[remarkGfm]}
+                            components={mdComponents}
+                          >
+                            {msg.content}
+                          </ReactMarkdown>
+                        )}
+                      </div>
+
+                      {/* Copy button — visible on hover */}
+                      {!isTyping && msg.content && (
+                        <div className="flex opacity-0 group-hover:opacity-100 transition-opacity mt-0.5 justify-end">
+                          <button
+                            onClick={() => copyMessage(msg.content, i)}
+                            className="flex items-center gap-1 text-[11px]
+                                       text-gray-400 hover:text-gray-600
+                                       dark:hover:text-gray-300 transition-colors"
+                            title="Copier"
+                          >
+                            {copiedIdx === i ? (
+                              <><Check className="w-3 h-3 text-green-500" /><span className="text-green-500">Copié</span></>
+                            ) : (
+                              <><Copy className="w-3 h-3" /><span>Copier</span></>
+                            )}
+                          </button>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -329,23 +503,38 @@ export function ChatBot() {
                 "
                 style={{ minHeight: '36px', maxHeight: '80px' }}
               />
-              <button
-                onClick={sendMessage}
-                disabled={!input.trim() || isStreaming}
-                className="
-                  shrink-0 w-9 h-9 rounded-xl
-                  bg-primary-600 text-white
-                  flex items-center justify-center
-                  hover:bg-primary-700
-                  disabled:opacity-40 disabled:cursor-not-allowed
-                  transition
-                "
-                aria-label="Envoyer"
-              >
-                {isStreaming
-                  ? <Loader2 className="w-4 h-4 animate-spin" />
-                  : <Send className="w-4 h-4" />}
-              </button>
+
+              {isStreaming ? (
+                <button
+                  onClick={stopStreaming}
+                  className="
+                    shrink-0 w-9 h-9 rounded-xl
+                    bg-red-500 hover:bg-red-600
+                    flex items-center justify-center
+                    transition
+                  "
+                  aria-label="Arrêter la réponse"
+                  title="Arrêter"
+                >
+                  <StopSquare />
+                </button>
+              ) : (
+                <button
+                  onClick={() => sendMessage()}
+                  disabled={!input.trim()}
+                  className="
+                    shrink-0 w-9 h-9 rounded-xl
+                    bg-primary-600 text-white
+                    flex items-center justify-center
+                    hover:bg-primary-700
+                    disabled:opacity-40 disabled:cursor-not-allowed
+                    transition
+                  "
+                  aria-label="Envoyer"
+                >
+                  <Send className="w-4 h-4" />
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -353,7 +542,7 @@ export function ChatBot() {
 
       {/* ── Floating button ────────────────────────────────────────────────── */}
       <button
-        onClick={() => setIsOpen((o) => !o)}
+        onClick={() => setIsOpen(o => !o)}
         className={`
           fixed z-50
           right-4 bottom-[4.75rem]
@@ -368,8 +557,8 @@ export function ChatBot() {
         aria-label={isOpen ? 'Fermer FamilyBot' : 'Ouvrir FamilyBot'}
       >
         {isOpen
-          ? <X    className="w-5 h-5 text-white" />
-          : <Bot  className="w-5 h-5 text-white" />}
+          ? <X   className="w-5 h-5 text-white" />
+          : <Bot className="w-5 h-5 text-white" />}
       </button>
     </>
   );
