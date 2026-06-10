@@ -3,8 +3,9 @@ import { Link } from 'react-router-dom';
 import {
   Calendar, ListTodo, MessageCircle, Image,
   MapPin, Wallet, UtensilsCrossed, ChevronRight, Users,
-  Package, AlertTriangle,
+  Package, AlertTriangle, Droplets,
 } from 'lucide-react';
+import { useDiabetesStore, toDisplay, glucoseStatus, STATUS_TEXT_COLORS } from '../stores/diabetesStore';
 import { useFamilyStore } from '../stores/familyStore';
 import { useAuthStore } from '../stores/authStore';
 import { Button } from '../components/ui/Button';
@@ -22,12 +23,14 @@ const modules = [
   { to: '/location',  icon: MapPin,          label: 'Localisation', color: 'bg-location/10 text-location',   desc: 'Carte de la famille' },
   { to: '/budget',    icon: Wallet,          label: 'Budget',      color: 'bg-budget/10 text-budget',         desc: 'Dépenses et objectifs' },
   { to: '/meals',     icon: UtensilsCrossed, label: 'Repas',       color: 'bg-meals/10 text-meals',           desc: 'Menu de la semaine' },
+  { to: '/diabetes',  icon: Droplets,        label: 'Glycémie',    color: 'bg-red-50 text-red-500',           desc: 'Suivi du diabète' },
 ];
 
 export function DashboardPage() {
   const { user } = useAuthStore();
   const { activeFamily, families, fetchFamilies, createFamily } = useFamilyStore();
   const familyId = activeFamily?._id;
+  const { glucose: glucoseReadings, settings: diabetesSettings } = useDiabetesStore();
 
   const [showCreate, setShowCreate] = useState(false);
   const [familyName, setFamilyName] = useState('');
@@ -152,6 +155,50 @@ export function DashboardPage() {
           </Link>
         ))}
       </div>
+
+      {/* ── Diabetes widget ──────────────────────────────────────────────── */}
+      {glucoseReadings.length > 0 && (() => {
+        const latest = [...glucoseReadings].sort(
+          (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+        )[0];
+        const start = new Date(); start.setHours(0, 0, 0, 0);
+        const todayReadings = glucoseReadings.filter((r) => new Date(r.timestamp) >= start);
+        const avg = todayReadings.length
+          ? todayReadings.reduce((s, r) => s + r.value, 0) / todayReadings.length
+          : null;
+        const status = glucoseStatus(latest.value, diabetesSettings);
+        return (
+          <div className="card p-4 mt-6">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-red-50 dark:bg-red-900/30 flex items-center justify-center">
+                  <Droplets className="w-4 h-4 text-red-500" />
+                </div>
+                <h3 className="font-semibold text-sm">Glycémie</h3>
+              </div>
+              <Link to="/diabetes" className="flex items-center gap-0.5 text-xs text-red-500 hover:underline">
+                Voir tout <ChevronRight className="w-3.5 h-3.5" />
+              </Link>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
+                <p className="text-xs text-gray-500 mb-1">Dernière mesure</p>
+                <p className={`text-2xl font-bold ${STATUS_TEXT_COLORS[status]}`}>
+                  {toDisplay(latest.value, diabetesSettings.unit)}
+                </p>
+                <p className="text-xs text-gray-400">{diabetesSettings.unit}</p>
+              </div>
+              <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
+                <p className="text-xs text-gray-500 mb-1">Moyenne auj.</p>
+                <p className="text-2xl font-bold text-gray-700 dark:text-gray-200">
+                  {avg ? toDisplay(avg, diabetesSettings.unit) : '–'}
+                </p>
+                <p className="text-xs text-gray-400">{todayReadings.length} mesure{todayReadings.length > 1 ? 's' : ''}</p>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── Inventory widget ──────────────────────────────────────────────── */}
       {inventoryItems.length > 0 && (

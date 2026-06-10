@@ -17,6 +17,7 @@ import { ProfilePage } from '../pages/ProfilePage';
 import { AcceptInvitePage } from '../pages/AcceptInvitePage';
 import { ForgotPasswordPage } from '../pages/ForgotPasswordPage';
 import { ResetPasswordPage } from '../pages/ResetPasswordPage';
+import { DiabetesPage } from '../pages/DiabetesPage';
 
 export function AppRouter() {
   return (
@@ -52,6 +53,7 @@ export function AppRouter() {
           <Route path="meals" element={<MealPlanPage />} />
           <Route path="family/settings" element={<FamilySettingsPage />} />
           <Route path="profile" element={<ProfilePage />} />
+          <Route path="diabetes" element={<DiabetesPage />} />
         </Route>
 
         {/* Catch all */}

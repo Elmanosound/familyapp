@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom';
 import { clsx } from 'clsx';
 import {
   LayoutDashboard, Calendar, ListTodo, MessageCircle, Image,
-  MapPin, Wallet, UtensilsCrossed, Settings, LogOut, ChevronDown, Users, Package,
+  MapPin, Wallet, UtensilsCrossed, Settings, LogOut, ChevronDown, Users, Package, Droplets,
 } from 'lucide-react';
 import { useAuthStore } from '../../stores/authStore';
 import { useFamilyStore } from '../../stores/familyStore';
@@ -19,6 +19,7 @@ const navItems = [
   { to: '/location', icon: MapPin, label: 'Localisation', color: 'text-location' },
   { to: '/budget', icon: Wallet, label: 'Budget', color: 'text-budget' },
   { to: '/meals', icon: UtensilsCrossed, label: 'Repas', color: 'text-meals' },
+  { to: '/diabetes', icon: Droplets, label: 'Glycémie', color: 'text-red-500' },
 ];
 
 export function Sidebar() {

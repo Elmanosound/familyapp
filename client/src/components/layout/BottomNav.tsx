@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom';
 import { clsx } from 'clsx';
 import { LayoutDashboard, Calendar, ListTodo, MessageCircle, Menu } from 'lucide-react';
 import { useState } from 'react';
-import { Image, MapPin, Wallet, UtensilsCrossed, Settings, X, Package } from 'lucide-react';
+import { Image, MapPin, Wallet, UtensilsCrossed, Settings, X, Package, Droplets } from 'lucide-react';
 
 const primaryTabs = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Accueil' },
@@ -17,6 +17,7 @@ const moreTabs = [
   { to: '/location', icon: MapPin, label: 'Carte' },
   { to: '/budget', icon: Wallet, label: 'Budget' },
   { to: '/meals', icon: UtensilsCrossed, label: 'Repas' },
+  { to: '/diabetes', icon: Droplets, label: 'Glycémie' },
   { to: '/family/settings', icon: Settings, label: 'Paramètres' },
 ];
 
