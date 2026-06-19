@@ -7,7 +7,13 @@ import { logger } from '../config/logger.js';
 export function initializeSocket(httpServer: HttpServer) {
   const io = new Server(httpServer, {
     cors: {
-      origin: process.env.CLIENT_URL || 'http://localhost:5173',
+      // Web client origin plus the native app (Capacitor) localhost schemes.
+      origin: [
+        process.env.CLIENT_URL || 'http://localhost:5173',
+        'https://localhost',
+        'http://localhost',
+        'capacitor://localhost',
+      ],
       methods: ['GET', 'POST'],
     },
   });
@@ -41,26 +47,40 @@ export function initializeSocket(httpServer: HttpServer) {
       socket.join(fm.familyId);
     }
 
+    // Families this socket is authorised to act in. Every client event carries a
+    // familyId, so each handler must confirm membership before writing to the DB
+    // or broadcasting — otherwise any authenticated socket could inject into, or
+    // leak into, an arbitrary family's room by guessing its id.
+    const memberFamilyIds = new Set<string>(
+      user.familyMembers.map((fm: { familyId: string }) => fm.familyId),
+    );
+
     // Chat: send message
     socket.on('chat:send', async (data) => {
       const { familyId, content, type, replyTo } = data;
-      const message = await prisma.message.create({
-        data: {
-          familyId,
-          senderId: user.id,
-          type: type || 'text',
-          content,
-          replyToId: replyTo,
-        },
-        include: {
-          sender: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } },
-        },
-      });
-      io.to(familyId).emit('chat:message', { message });
+      if (!memberFamilyIds.has(familyId)) return;
+      try {
+        const message = await prisma.message.create({
+          data: {
+            familyId,
+            senderId: user.id,
+            type: type || 'text',
+            content,
+            replyToId: replyTo,
+          },
+          include: {
+            sender: { select: { id: true, firstName: true, lastName: true, avatarUrl: true } },
+          },
+        });
+        io.to(familyId).emit('chat:message', { message });
+      } catch (err) {
+        logger.warn({ err, familyId, userId: user.id }, '[socket] chat:send failed');
+      }
     });
 
     // Chat: typing
     socket.on('chat:typing', (data) => {
+      if (!memberFamilyIds.has(data.familyId)) return;
       socket.to(data.familyId).emit('chat:typing', {
         familyId: data.familyId,
         userId: user.id,
@@ -71,21 +91,27 @@ export function initializeSocket(httpServer: HttpServer) {
     // Chat: mark as read
     socket.on('chat:read', async (data) => {
       const { familyId, messageId } = data;
-      await prisma.messageReadReceipt.upsert({
-        where: { messageId_userId: { messageId, userId: user.id } },
-        create: { messageId, userId: user.id },
-        update: { readAt: new Date() },
-      });
-      io.to(familyId).emit('chat:read', {
-        messageId,
-        userId: user.id,
-        readAt: new Date().toISOString(),
-      });
+      if (!memberFamilyIds.has(familyId)) return;
+      try {
+        await prisma.messageReadReceipt.upsert({
+          where: { messageId_userId: { messageId, userId: user.id } },
+          create: { messageId, userId: user.id },
+          update: { readAt: new Date() },
+        });
+        io.to(familyId).emit('chat:read', {
+          messageId,
+          userId: user.id,
+          readAt: new Date().toISOString(),
+        });
+      } catch (err) {
+        logger.warn({ err, familyId, userId: user.id }, '[socket] chat:read failed');
+      }
     });
 
     // Location: update
     socket.on('location:update', (data) => {
       const { familyId, lat, lng } = data;
+      if (!memberFamilyIds.has(familyId)) return;
       io.to(familyId).emit('location:updated', {
         userId: user.id,
         coordinates: [lng, lat],
@@ -96,6 +122,7 @@ export function initializeSocket(httpServer: HttpServer) {
     // List: toggle item
     socket.on('list:item:toggle', (data) => {
       const { familyId, listId, itemId } = data;
+      if (!memberFamilyIds.has(familyId)) return;
       io.to(familyId).emit('list:updated', {
         listId,
         itemId,

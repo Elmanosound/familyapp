@@ -32,7 +32,25 @@ app.use(
     contentSecurityPolicy: false,
   }),
 );
-app.use(cors({ origin: env.CLIENT_URL, credentials: true }));
+// Allowed browser origins. The native Android/iOS app (Capacitor) runs from a
+// localhost WebView scheme, so those origins must be permitted alongside the
+// configured web client. Requests with no Origin header (e.g. native HTTP
+// clients, curl) are allowed through as well.
+const allowedOrigins = [
+  env.CLIENT_URL,
+  'https://localhost', // Capacitor Android (androidScheme: 'https')
+  'http://localhost',
+  'capacitor://localhost', // Capacitor iOS
+];
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) callback(null, true);
+      else callback(new Error(`Origin not allowed by CORS: ${origin}`));
+    },
+    credentials: true,
+  }),
+);
 app.use(cookieParser());
 
 // Structured JSON HTTP logging via Pino.

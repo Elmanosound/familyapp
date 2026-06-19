@@ -33,6 +33,14 @@ function clearRefreshCookie(res: Response): void {
   res.clearCookie(REFRESH_COOKIE, { path: '/api/v1/auth' });
 }
 
+// The native mobile app (Capacitor) runs on a different origin (https://localhost)
+// so the HttpOnly refresh cookie is cross-site and never sent. Such clients send
+// `x-client-type: mobile`; for them we also return the refresh token in the body
+// and accept it from the body on refresh. Browsers keep the cookie-only flow.
+function isMobileClient(req: Request): boolean {
+  return req.get('x-client-type') === 'mobile';
+}
+
 // ── Controllers ───────────────────────────────────────────────────────────
 
 export async function register(req: Request, res: Response, next: NextFunction) {
@@ -55,8 +63,12 @@ export async function register(req: Request, res: Response, next: NextFunction) 
     setRefreshCookie(res, refreshToken);
 
     const { password: _, refreshToken: __, resetPasswordToken: ___, ...safeUser } = user;
-    // refreshToken is NOT returned in the body — it lives in the HttpOnly cookie
-    res.status(201).json({ user: safeUser, accessToken });
+    // Browser: refreshToken stays in the HttpOnly cookie. Mobile: also in body.
+    res.status(201).json({
+      user: safeUser,
+      accessToken,
+      ...(isMobileClient(req) && { refreshToken }),
+    });
   } catch (error) {
     next(error);
   }
@@ -79,8 +91,12 @@ export async function login(req: Request, res: Response, next: NextFunction) {
     setRefreshCookie(res, refreshToken);
 
     const { password: _, refreshToken: __, resetPasswordToken: ___, ...safeUser } = user;
-    // refreshToken is NOT returned in the body — it lives in the HttpOnly cookie
-    res.json({ user: safeUser, accessToken });
+    // Browser: refreshToken stays in the HttpOnly cookie. Mobile: also in body.
+    res.json({
+      user: safeUser,
+      accessToken,
+      ...(isMobileClient(req) && { refreshToken }),
+    });
   } catch (error) {
     next(error);
   }
@@ -88,8 +104,11 @@ export async function login(req: Request, res: Response, next: NextFunction) {
 
 export async function refresh(req: Request, res: Response, next: NextFunction) {
   try {
-    // Read the refresh token from the HttpOnly cookie (not from the request body)
-    const refreshToken = req.cookies?.[REFRESH_COOKIE] as string | undefined;
+    // Browser: read from the HttpOnly cookie. Mobile: fall back to the body,
+    // since the cross-site cookie is not sent by the native WebView.
+    const refreshToken =
+      (req.cookies?.[REFRESH_COOKIE] as string | undefined) ??
+      (req.body?.refreshToken as string | undefined);
     if (!refreshToken) throw new UnauthorizedError('Refresh token required');
 
     const decoded = verifyRefreshToken(refreshToken);
@@ -110,8 +129,12 @@ export async function refresh(req: Request, res: Response, next: NextFunction) {
 
     setRefreshCookie(res, newRefreshToken);
 
-    // Only the short-lived access token is returned in the body
-    res.json({ accessToken: newAccessToken });
+    // Browser: only the access token in the body (refresh stays in the cookie).
+    // Mobile: also return the rotated refresh token so it can be re-stored.
+    res.json({
+      accessToken: newAccessToken,
+      ...(isMobileClient(req) && { refreshToken: newRefreshToken }),
+    });
   } catch (error) {
     next(error);
   }
