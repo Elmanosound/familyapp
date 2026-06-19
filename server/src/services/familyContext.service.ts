@@ -39,12 +39,47 @@ const MEAL_TYPE_FR: Record<string, string> = {
   snack:     'Collation',
 };
 
+// ── Topic detection — selects only the context sections the query needs ───────
+
+type ContextTopic = 'agenda' | 'lists' | 'budget' | 'meals' | 'general';
+
+const TOPIC_KEYWORDS: Record<ContextTopic, string[]> = {
+  agenda:  ['événement', 'agenda', 'calendrier', 'rdv', 'rendez-vous', 'réunion', 'sortie', 'semaine', 'demain', 'weekend', 'prévu', 'planifié', 'fête', 'vacances', 'prochains', 'schedule', 'event'],
+  lists:   ['liste', 'courses', 'acheter', 'tâche', 'todo', 'faire', 'manque', 'inventaire', 'stock', 'shopping'],
+  budget:  ['budget', 'argent', 'dépense', 'revenu', 'solde', 'épargne', 'objectif', 'finance', 'coût', 'prix', 'économie'],
+  meals:   ['repas', 'manger', 'dîner', 'déjeuner', 'petit-déjeuner', 'recette', 'menu', 'semaine', 'cuisine', 'plat'],
+  general: [],
+};
+
+function detectTopics(message: string): Set<ContextTopic> {
+  const lower = message.toLowerCase();
+  const topics = new Set<ContextTopic>();
+
+  for (const [topic, keywords] of Object.entries(TOPIC_KEYWORDS) as [ContextTopic, string[]][]) {
+    if (topic === 'general') continue;
+    if (keywords.some(kw => lower.includes(kw))) topics.add(topic);
+  }
+
+  // No specific topic detected → send everything (general question)
+  if (topics.size === 0) {
+    topics.add('agenda');
+    topics.add('lists');
+    topics.add('budget');
+    topics.add('meals');
+  }
+
+  return topics;
+}
+
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export async function buildFamilyContext(
-  userId:   string,
-  familyId: string,
+  userId:    string,
+  familyId:  string,
+  userMessage?: string,
 ): Promise<string | null> {
+
+  const topics = userMessage ? detectTopics(userMessage) : new Set<ContextTopic>(['agenda', 'lists', 'budget', 'meals']);
 
   // ── 1. Verify membership ─────────────────────────────────────────────────
 
@@ -64,64 +99,63 @@ export async function buildFamilyContext(
   });
   if (!membership) return null;
 
-  // ── 2. Parallel DB queries ───────────────────────────────────────────────
+  // ── 2. Parallel DB queries — only fetch what the topic requires ─────────────
 
-  const now         = new Date();
-  const twoWeeks    = new Date(now.getTime() + 14 * 86_400_000);
-  const monthStart  = new Date(now.getFullYear(), now.getMonth(), 1);
-  const monthEnd    = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+  const now        = new Date();
+  const twoWeeks   = new Date(now.getTime() + 14 * 86_400_000);
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const monthEnd   = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+
+  const EMPTY_AGG  = { _sum: { amount: null } };
 
   const [events, lists, expensesAgg, incomesAgg, goals, mealPlan] = await Promise.all([
 
-    // Upcoming calendar events
-    prisma.calendarEvent.findMany({
-      where: { familyId, startDate: { gte: now, lte: twoWeeks } },
-      orderBy: { startDate: 'asc' },
-      take: 12,
-    }),
+    topics.has('agenda')
+      ? prisma.calendarEvent.findMany({
+          where:   { familyId, startDate: { gte: now, lte: twoWeeks } },
+          orderBy: { startDate: 'asc' },
+          take:    6,   // 10 → 6 : ~100 tokens saved
+        })
+      : Promise.resolve([]),
 
-    // Active lists + their unchecked items
-    prisma.list.findMany({
-      where: { familyId, isArchived: false },
-      include: {
-        items: {
-          where:   { isCompleted: false },
-          orderBy: { sortOrder: 'asc' },
-          take:    20,
-        },
-      },
-      take: 8,
-    }),
+    topics.has('lists')
+      ? prisma.list.findMany({
+          where:   { familyId, isArchived: false },
+          include: {
+            items: {
+              where:   { isCompleted: false },
+              orderBy: { sortOrder: 'asc' },
+              take:    8,   // 15 → 8 : ~100 tokens saved
+            },
+          },
+          take: 4,   // 6 → 4
+        })
+      : Promise.resolve([]),
 
-    // Current-month expenses (total)
-    prisma.expense.aggregate({
-      where: { familyId, date: { gte: monthStart, lte: monthEnd } },
-      _sum:  { amount: true },
-    }),
+    topics.has('budget')
+      ? prisma.expense.aggregate({ where: { familyId, date: { gte: monthStart, lte: monthEnd } }, _sum: { amount: true } })
+      : Promise.resolve(EMPTY_AGG),
 
-    // Current-month incomes (total)
-    prisma.income.aggregate({
-      where: { familyId, date: { gte: monthStart, lte: monthEnd } },
-      _sum:  { amount: true },
-    }),
+    topics.has('budget')
+      ? prisma.income.aggregate({ where: { familyId, date: { gte: monthStart, lte: monthEnd } }, _sum: { amount: true } })
+      : Promise.resolve(EMPTY_AGG),
 
-    // Active savings goals
-    prisma.budgetGoal.findMany({
-      where: { familyId, isCompleted: false },
-      take:  5,
-    }),
+    topics.has('budget')
+      ? prisma.budgetGoal.findMany({ where: { familyId, isCompleted: false }, take: 4 })
+      : Promise.resolve([]),
 
-    // Most recent meal plan with its slots
-    prisma.mealPlan.findFirst({
-      where:   { familyId },
-      orderBy: { weekStartDate: 'desc' },
-      include: {
-        meals: {
-          include: { recipe: { select: { name: true } } },
-          orderBy: [{ dayOfWeek: 'asc' }, { mealType: 'asc' }],
-        },
-      },
-    }),
+    topics.has('meals')
+      ? prisma.mealPlan.findFirst({
+          where:   { familyId },
+          orderBy: { weekStartDate: 'desc' },
+          include: {
+            meals: {
+              include: { recipe: { select: { name: true } } },
+              orderBy: [{ dayOfWeek: 'asc' }, { mealType: 'asc' }],
+            },
+          },
+        })
+      : Promise.resolve(null),
   ]);
 
   // ── 3. Assemble context block ────────────────────────────────────────────
@@ -143,72 +177,83 @@ export async function buildFamilyContext(
   lines.push('');
 
   // ── Agenda ──────────────────────────────────────────────────────────────
-  lines.push('📅 AGENDA — 14 PROCHAINS JOURS');
-  if (events.length === 0) {
-    lines.push('  Aucun événement prévu.');
-  } else {
-    for (const e of events) {
-      const start    = new Date(e.startDate);
-      const timeStr  = e.allDay ? 'toute la journée' : fmtTime(start);
-      const locStr   = e.location ? ` @ ${e.location}` : '';
-      lines.push(`  • ${fmtDay(start)} — ${e.title} (${timeStr})${locStr}`);
+  // Only render sections that were actually requested (topic-filtered).
+  // Skipping empty sections keeps the prompt compact for focused queries.
+
+  if (topics.has('agenda')) {
+    lines.push('📅 AGENDA — 14 PROCHAINS JOURS');
+    if (events.length === 0) {
+      lines.push('  Aucun événement prévu.');
+    } else {
+      for (const e of events) {
+        const start   = new Date(e.startDate);
+        const timeStr = e.allDay ? 'toute la journée' : fmtTime(start);
+        const locStr  = e.location ? ` @ ${e.location}` : '';
+        lines.push(`  • ${fmtDay(start)} — ${e.title} (${timeStr})${locStr}`);
+      }
     }
+    lines.push('');
   }
-  lines.push('');
 
   // ── Lists ────────────────────────────────────────────────────────────────
-  lines.push('📋 LISTES ACTIVES');
-  const listsWithItems = lists.filter(l => l.items.length > 0);
-  if (listsWithItems.length === 0) {
-    lines.push('  Toutes les listes sont vides ou archivées.');
-  } else {
-    for (const list of listsWithItems) {
-      const items = list.items.map(i => i.text).join(', ');
-      lines.push(`  • ${list.name} (${list.items.length} élément${list.items.length > 1 ? 's' : ''}) : ${items}`);
+  if (topics.has('lists')) {
+    lines.push('📋 LISTES ACTIVES');
+    const listsWithItems = lists.filter(l => l.items.length > 0);
+    if (listsWithItems.length === 0) {
+      lines.push('  Toutes les listes sont vides ou archivées.');
+    } else {
+      for (const list of listsWithItems) {
+        const items = list.items.map(i => i.text).join(', ');
+        lines.push(`  • ${list.name} (${list.items.length} élément${list.items.length > 1 ? 's' : ''}) : ${items}`);
+      }
     }
+    lines.push('');
   }
-  lines.push('');
 
   // ── Budget ───────────────────────────────────────────────────────────────
-  const totalExpenses = expensesAgg._sum.amount ?? 0;
-  const totalIncome   = incomesAgg._sum.amount  ?? 0;
-  const balance       = totalIncome - totalExpenses;
-  const sign          = balance >= 0 ? '+' : '';
+  if (topics.has('budget')) {
+    const totalExpenses = expensesAgg._sum.amount ?? 0;
+    const totalIncome   = incomesAgg._sum.amount  ?? 0;
+    const balance       = totalIncome - totalExpenses;
+    const sign          = balance >= 0 ? '+' : '';
 
-  lines.push(`💰 BUDGET — ${fmtMonthYear(now).toUpperCase()}`);
-  lines.push(
-    `  Revenus : ${fmtCurrency(totalIncome)}  |  Dépenses : ${fmtCurrency(totalExpenses)}  |  Solde : ${sign}${fmtCurrency(balance)}`,
-  );
-  if (goals.length > 0) {
-    lines.push('  Objectifs d\'épargne :');
-    for (const g of goals) {
-      const pct = g.targetAmount > 0
-        ? Math.round((g.currentAmount / g.targetAmount) * 100)
-        : 0;
-      const deadline = g.deadline
-        ? ` (échéance : ${fmtDay(new Date(g.deadline))})`
-        : '';
-      lines.push(
-        `    – ${g.name}${deadline} : ${fmtCurrency(g.currentAmount)} / ${fmtCurrency(g.targetAmount)} (${pct} %)`,
-      );
+    lines.push(`💰 BUDGET — ${fmtMonthYear(now).toUpperCase()}`);
+    lines.push(
+      `  Revenus : ${fmtCurrency(totalIncome)}  |  Dépenses : ${fmtCurrency(totalExpenses)}  |  Solde : ${sign}${fmtCurrency(balance)}`,
+    );
+    if (goals.length > 0) {
+      lines.push('  Objectifs d\'épargne :');
+      for (const g of goals) {
+        const pct = g.targetAmount > 0
+          ? Math.round((g.currentAmount / g.targetAmount) * 100)
+          : 0;
+        const deadline = g.deadline
+          ? ` (échéance : ${fmtDay(new Date(g.deadline))})`
+          : '';
+        lines.push(
+          `    – ${g.name}${deadline} : ${fmtCurrency(g.currentAmount)} / ${fmtCurrency(g.targetAmount)} (${pct} %)`,
+        );
+      }
     }
+    lines.push('');
   }
-  lines.push('');
 
   // ── Meal plan ────────────────────────────────────────────────────────────
-  lines.push('🍽️  PLAN DE REPAS (semaine en cours)');
-  if (!mealPlan || mealPlan.meals.length === 0) {
-    lines.push('  Aucun plan de repas défini.');
-  } else {
-    const weekStart = new Date(mealPlan.weekStartDate);
-    for (const slot of mealPlan.meals) {
-      const dayDate   = new Date(weekStart.getTime() + slot.dayOfWeek * 86_400_000);
-      const mealName  = slot.recipe?.name ?? slot.customMealName ?? '—';
-      const typeLabel = MEAL_TYPE_FR[slot.mealType] ?? slot.mealType;
-      lines.push(`  • ${fmtDay(dayDate)} ${typeLabel} : ${mealName}`);
+  if (topics.has('meals')) {
+    lines.push('🍽️  PLAN DE REPAS (semaine en cours)');
+    if (!mealPlan || mealPlan.meals.length === 0) {
+      lines.push('  Aucun plan de repas défini.');
+    } else {
+      const weekStart = new Date(mealPlan.weekStartDate);
+      for (const slot of mealPlan.meals) {
+        const dayDate   = new Date(weekStart.getTime() + slot.dayOfWeek * 86_400_000);
+        const mealName  = slot.recipe?.name ?? slot.customMealName ?? '—';
+        const typeLabel = MEAL_TYPE_FR[slot.mealType] ?? slot.mealType;
+        lines.push(`  • ${fmtDay(dayDate)} ${typeLabel} : ${mealName}`);
+      }
     }
+    lines.push('');
   }
-  lines.push('');
 
   lines.push('=== FIN DU CONTEXTE ===');
 

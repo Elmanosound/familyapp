@@ -21,3 +21,12 @@ caddy_config/
 .vscode/
 electron/dist/
 dist-electron/
+
+# Capacitor-generated native project (regenerated via `npx cap add android`)
+client/android/
+
+# Generated type declaration from vite.config.ts
+client/vite.config.d.ts
+
+# graphify knowledge-graph output (local analysis artifacts)
+graphify-out/

@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 import type { User } from '@familyapp/shared';
 import api from '../config/api';
 import { connectSocket, disconnectSocket } from '../config/socket';
+import { isNative, setStoredRefreshToken } from '../config/platform';
 
 interface AuthState {
   user: User | null;
@@ -31,6 +32,9 @@ export const useAuthStore = create<AuthState>()(
           // The server sets the refresh token as an HttpOnly cookie automatically.
           // We only store the short-lived access token in localStorage.
           localStorage.setItem('accessToken', data.accessToken);
+          // Native: the cookie can't be used cross-site, so persist the refresh
+          // token returned in the body (web: data.refreshToken is undefined).
+          if (isNative() && data.refreshToken) setStoredRefreshToken(data.refreshToken);
           connectSocket(data.accessToken);
           set({ user: data.user, accessToken: data.accessToken, isAuthenticated: true });
         } finally {
@@ -43,6 +47,7 @@ export const useAuthStore = create<AuthState>()(
         try {
           const { data } = await api.post('/auth/register', registerData);
           localStorage.setItem('accessToken', data.accessToken);
+          if (isNative() && data.refreshToken) setStoredRefreshToken(data.refreshToken);
           connectSocket(data.accessToken);
           set({ user: data.user, accessToken: data.accessToken, isAuthenticated: true });
         } finally {
@@ -55,6 +60,7 @@ export const useAuthStore = create<AuthState>()(
         // the HttpOnly cookie. Fire-and-forget — we log out locally regardless.
         api.post('/auth/logout').catch(() => {});
         localStorage.removeItem('accessToken');
+        if (isNative()) setStoredRefreshToken(null);
         disconnectSocket();
         set({ user: null, accessToken: null, isAuthenticated: false });
       },

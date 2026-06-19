@@ -20,15 +20,23 @@ import {
   Bot, X, Send, Loader2,
   Wifi, WifiOff, Trash2,
   Copy, Check, Users,
+  CalendarPlus, AlertCircle,
 } from 'lucide-react';
 import { useFamilyStore } from '../../stores/familyStore';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+interface ToolCallResult {
+  name:    string;
+  success: boolean;
+  message: string;
+}
+
 interface Message {
-  role:     'user' | 'assistant';
-  content:  string;
-  isError?: boolean;
+  role:      'user' | 'assistant';
+  content:   string;
+  isError?:  boolean;
+  toolCall?: ToolCallResult;
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -46,9 +54,9 @@ const GENERIC_SUGGESTIONS = [
 
 const FAMILY_SUGGESTIONS = [
   'Quels sont nos prochains événements ?',
+  'Ajoute un rendez-vous médecin vendredi à 10h',
   'Qu\'est-ce qu\'on mange cette semaine ?',
   'Comment se porte notre budget ce mois ?',
-  'Qu\'est-ce qu\'il reste à faire sur nos listes ?',
 ];
 
 // ── Stop-button icon ──────────────────────────────────────────────────────────
@@ -199,7 +207,10 @@ export function ChatBot() {
           if (!line.startsWith('data: ')) continue;
           try {
             const data = JSON.parse(line.slice(6)) as {
-              content?: string; done?: boolean; error?: string;
+              content?: string;
+              done?:    boolean;
+              error?:   string;
+              tool?:    ToolCallResult;
             };
 
             if (data.error) {
@@ -210,6 +221,18 @@ export function ChatBot() {
               break outer;
             }
             if (data.done) break outer;
+
+            // Tool execution result — attach to the current assistant message
+            if (data.tool) {
+              setMessages(prev => {
+                const last = prev[prev.length - 1];
+                return [
+                  ...prev.slice(0, -1),
+                  { ...last, toolCall: data.tool },
+                ];
+              });
+            }
+
             if (data.content) {
               setMessages(prev => {
                 const last = prev[prev.length - 1];
@@ -418,7 +441,7 @@ export function ChatBot() {
                             flex items-center gap-1.5">
               <Users className="w-3 h-3 text-primary-600 dark:text-primary-400 shrink-0" />
               <span className="text-[11px] text-primary-700 dark:text-primary-300">
-                Contexte famille activé — le bot connaît votre agenda, listes, budget et repas.
+                Contexte famille activé — le bot connaît vos données et peut ajouter des événements.
               </span>
             </div>
           )}
@@ -483,6 +506,28 @@ export function ChatBot() {
 
                     {/* Bubble + copy */}
                     <div className="group max-w-[78%] flex flex-col">
+
+                      {/* Tool call confirmation card */}
+                      {msg.toolCall && (
+                        <div className={`flex items-start gap-2 px-3 py-2 rounded-xl mb-1.5 text-xs ${
+                          msg.toolCall.success
+                            ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800'
+                            : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800'
+                        }`}>
+                          {msg.toolCall.success ? (
+                            <CalendarPlus className="w-3.5 h-3.5 mt-0.5 shrink-0 text-green-600 dark:text-green-400" />
+                          ) : (
+                            <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0 text-red-500" />
+                          )}
+                          <span className={msg.toolCall.success
+                            ? 'text-green-700 dark:text-green-300'
+                            : 'text-red-600 dark:text-red-400'
+                          }>
+                            {msg.toolCall.message}
+                          </span>
+                        </div>
+                      )}
+
                       <div className={`px-3 py-2 rounded-2xl text-sm leading-relaxed ${
                         msg.role === 'user'
                           ? 'bg-primary-600 text-white rounded-br-sm'

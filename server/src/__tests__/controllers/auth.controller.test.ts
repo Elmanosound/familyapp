@@ -117,6 +117,22 @@ describe('Auth API', () => {
       expect(res.headers['set-cookie']).toBeDefined();
     });
 
+    it('also returns refreshToken in the body for the native mobile client', async () => {
+      const hashed = await bcrypt.hash('password123', 10);
+      vi.mocked(prisma.user.findUnique).mockResolvedValue(mockUser({ password: hashed }) as any);
+      vi.mocked(prisma.user.update).mockResolvedValue(mockUser() as any);
+
+      const res = await request(app)
+        .post('/api/v1/auth/login')
+        .set('x-client-type', 'mobile')
+        .send({ email: 'alice@example.com', password: 'password123' });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('accessToken');
+      // Mobile WebView can't use the cross-site cookie, so the token is in the body
+      expect(res.body).toHaveProperty('refreshToken');
+    });
+
     it('returns 401 for an unknown email', async () => {
       vi.mocked(prisma.user.findUnique).mockResolvedValue(null);
 

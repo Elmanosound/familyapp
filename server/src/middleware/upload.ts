@@ -10,13 +10,34 @@ if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
 
+// Map each accepted MIME type to a canonical file extension. The stored
+// filename's extension is derived from the (filter-validated) MIME type, never
+// from the client-supplied originalname — otherwise a caller could have the file
+// persisted, and later served from /uploads, under an attacker-chosen extension
+// such as .html (a stored-XSS vector).
+const MIME_EXTENSIONS: Record<string, string> = {
+  'image/jpeg':      '.jpg',
+  'image/png':       '.png',
+  'image/gif':       '.gif',
+  'image/webp':      '.webp',
+  'image/heic':      '.heic',
+  'image/heif':      '.heif',
+  'video/mp4':       '.mp4',
+  'video/quicktime': '.mov',
+  'video/webm':      '.webm',
+  'application/pdf': '.pdf',
+};
+
+// '.bin' is only a defensive fallback: fileFilter runs first and rejects any
+// MIME type not present in the map above, so it is never reached in practice.
+const extFor = (mimetype: string): string => MIME_EXTENSIONS[mimetype] ?? '.bin';
+
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => {
     cb(null, UPLOADS_DIR);
   },
   filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    cb(null, `${randomUUID()}${ext}`);
+    cb(null, `${randomUUID()}${extFor(file.mimetype)}`);
   },
 });
 
@@ -50,8 +71,7 @@ if (!fs.existsSync(RECEIPTS_DIR)) fs.mkdirSync(RECEIPTS_DIR, { recursive: true }
 const receiptStorage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, RECEIPTS_DIR),
   filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
-    cb(null, `${randomUUID()}${ext}`);
+    cb(null, `${randomUUID()}${extFor(file.mimetype)}`);
   },
 });
 

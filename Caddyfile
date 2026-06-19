@@ -17,7 +17,28 @@
 
 {$DOMAIN} {
 
-    # ── Reverse proxy ─────────────────────────────────────────
+    # ── SSE / streaming routes — bypass gzip, never buffer ───────
+    # /api/v1/chat/stream produces Server-Sent Events; gzip would
+    # buffer tokens and cause the client to see stale data.
+    @sse path /api/v1/chat/stream
+    handle @sse {
+        reverse_proxy app:8080 {
+            header_up Host              {host}
+            header_up X-Real-IP         {remote_host}
+            header_up X-Forwarded-For   {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+            flush_interval -1
+            transport http {
+                # Allow up to 3 min for a slow local LLM to finish prefill
+                # before the first token is streamed to the client.
+                response_header_timeout 180s
+                keepalive               180s
+                keepalive_idle_conns    16
+            }
+        }
+    }
+
+    # ── All other routes ──────────────────────────────────────
     reverse_proxy app:8080 {
         # Forward real client info to the Node.js app
         header_up Host              {host}
@@ -36,7 +57,7 @@
         }
     }
 
-    # ── Compression ───────────────────────────────────────────
+    # ── Compression (JSON, HTML, JS, CSS — not SSE) ───────────
     encode gzip
 
     # ── Security headers ──────────────────────────────────────
